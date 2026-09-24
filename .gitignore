@@ -2,7 +2,8 @@ node_modules/
 .release/
 .prune-demo/
 .prune/
-.agents/skills/open-source-maintainer/
+.agents/skills/
+skills-lock.json
 runs/
 *.log
 *.local.json
