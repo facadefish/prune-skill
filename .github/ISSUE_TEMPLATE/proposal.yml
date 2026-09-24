@@ -1,0 +1,27 @@
+name: Improvement proposal
+description: Suggest a focused improvement to Prune
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please describe the user task and expected benefit. Do not include private skills, review plans, local paths, or tokens.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Task and current problem
+      description: What are you trying to do, and what happens today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+      description: Describe the smallest useful behavior change.
+    validations:
+      required: true
+  - type: textarea
+    id: boundaries
+    attributes:
+      label: Impact on review and Apply boundaries
+      description: Explain whether this changes what Prune may suggest, apply, or restore.
