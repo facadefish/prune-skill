@@ -432,3 +432,104 @@ test('Prune restores the complete merge group when its second archive rename fai
   assert.equal(job.items[0].status, 'rolled-back');
   assert.deepEqual(await fingerprint(f.skills), original);
 });
+
+test('Prune rejects redirected archive roots before restoring any path in a group', async t => {
+  const f = await fixture(t, 2);
+  f.input.items = [{ ...f.input.items[0], action: 'merge', changes: f.input.items.flatMap(item => item.changes) }];
+  const { wb } = await f.open(), job = await apply(wb, ['s0']);
+  const archive = path.join(f.run, job.items[0].steps[0].archive), retained = archive + '-retained';
+  await fs.rename(archive, retained);
+  await fs.symlink(retained, archive, process.platform === 'win32' ? 'junction' : 'dir');
+  const before = await fingerprint(f.skills);
+  const result = await restore(wb, job.id, ['s0']);
+  assert.equal(result.status, 'failed');
+  assert.match(result.error, /归档.*变化/);
+  assert.deepEqual(await fingerprint(f.skills), before, 'all live paths remain untouched on archive drift');
+  assert.equal((await fs.lstat(archive)).isSymbolicLink(), true);
+  assert.equal(await exists(retained), true);
+});
+
+test('Prune reports an identical redirected live root as drift and refuses Restore', async t => {
+  const f = await fixture(t, 1), { wb } = await f.open(), job = await apply(wb, ['s0']);
+  const source = path.join(f.skills, 's0'), retained = path.join(f.root, 'retained-live');
+  await fs.rename(source, retained);
+  await fs.symlink(retained, source, process.platform === 'win32' ? 'junction' : 'dir');
+  const before = await fingerprint(source);
+  await wb.refreshObservations(true);
+  assert.equal(wb.view().items[0].effectiveState.status, 'drifted');
+  const result = await restore(wb, job.id, ['s0']);
+  assert.equal(result.status, 'failed');
+  assert.deepEqual(await fingerprint(source), before);
+  assert.equal((await fs.lstat(source)).isSymbolicLink(), true);
+  assert.equal(await exists(path.join(f.run, job.items[0].steps[0].archive)), true);
+});
+
+for (const side of ['snapshot', 'candidate']) {
+  test('Prune rejects frozen preview content drift in ' + side, async t => {
+    const f = await fixture(t, 1), { wb } = await f.open();
+    const file = path.join(f.run, wb.item('s0').changes[0][side], 'SKILL.md');
+    await fs.appendFile(file, 'Later unreviewed text.\n');
+    await assert.rejects(wb.details('s0'), /预览.*变化/);
+  });
+  for (const level of ['root', 'parent']) {
+    test('Prune rejects frozen preview ' + side + ' ' + level + ' redirection', async t => {
+      const f = await fixture(t, 1), { wb } = await f.open();
+      const root = path.join(f.run, wb.item('s0').changes[0][side]);
+      const redirected = level === 'root' ? root : path.dirname(root), retained = redirected + '-retained';
+      await fs.rename(redirected, retained);
+      await fs.symlink(retained, redirected, process.platform === 'win32' ? 'junction' : 'dir');
+      await assert.rejects(wb.details('s0'), /预览.*变化|路径.*变化|路径.*重定向/);
+    });
+  }
+}
+
+test('Prune hashes the same bytes it returns in a frozen preview, including the truncated tail', async t => {
+  const f = await fixture(t, 1);
+  await fs.writeFile(path.join(f.input.items[0].changes[0].candidate, 'long.txt'), 'a'.repeat(200_001));
+  const { wb } = await f.open();
+  const file = path.join(f.run, wb.item('s0').changes[0].candidate, 'long.txt');
+  const clean = (await wb.details('s0')).files.find(entry => entry.path === 'long.txt');
+  assert.equal(clean.after.length, 200_000);
+  assert.equal(clean.truncated, true);
+  const open = fs.open;
+  let injected = false;
+  t.mock.method(fs, 'open', async (target, ...args) => {
+    if (target === file && !injected) {
+      injected = true;
+      await fs.writeFile(file, 'a'.repeat(200_000) + 'b');
+    }
+    return open(target, ...args);
+  });
+  await assert.rejects(wb.details('s0'), /预览.*变化/);
+  assert.equal(injected, true);
+});
+
+for (const persisted of [false, true]) {
+  test('Prune releases its lock when initial journal save fails' + (persisted ? ' after persistence' : ''), async t => {
+    const f = await fixture(t, 1), { wb } = await f.open(), before = await fingerprint(f.skills);
+    await wb.select(wb.plan.fingerprint, { s0: 'approved' });
+    const save = wb.save.bind(wb);
+    let fail = true;
+    wb.save = async () => {
+      if (fail) {
+        if (persisted) await save();
+        throw Object.assign(new Error('Injected journal save failure'), { code: 'ENOSPC' });
+      }
+      return save();
+    };
+    const request = { planFingerprint: wb.plan.fingerprint, requestId: 'failed-start', itemIds: ['s0'] };
+    await assert.rejects(wb.start('apply', request), /Injected journal save failure/);
+    assert.equal(wb.busy, false);
+    assert.equal(await exists(path.join(f.root, 'locks', 'mutation.lock')), false);
+    assert.equal(wb.pending, undefined);
+    assert.deepEqual(await fingerprint(f.skills), before);
+    assert.equal(wb.state.jobs[0].status, 'interrupted');
+    fail = false;
+    assert.equal((await wb.start('apply', request)).status, 'interrupted', 'a failed request never replays');
+    const job = await wb.start('apply', { ...request, requestId: 'retry-after-repair' });
+    await wb.pending;
+    assert.equal(job.status, 'completed');
+    assert.equal((await restore(wb, job.id, ['s0'])).status, 'completed');
+    assert.deepEqual(await fingerprint(f.skills), before);
+  });
+}
