@@ -74,6 +74,8 @@ export async function fingerprintFile(file) {
 const changeFingerprint = (change, file) => change.type === 'file' ? fingerprintFile(file) : fingerprint(file);
 function sameSource(a, b) { return a === null ? b === null : !!b && a.hash === b.hash && a.realPath === b.realPath && a.link === b.link; }
 function sameContent(a, b) { return a === null ? b === null : !!b && a.hash === b.hash; }
+// Copies must remain ordinary objects at their frozen physical location.
+function sameCopy(a, b, location) { return sameContent(a, b) && (!b || (b.link === null && b.realPath === location)); }
 function changedFiles(a, b) {
   const before = new Map((a?.entries || []).map(f => [f.path, JSON.stringify(f)]));
   const after = new Map((b?.entries || []).map(f => [f.path, JSON.stringify(f)]));
@@ -326,7 +328,7 @@ export class Workbench {
           } else if (current?.item.status === 'applied') {
             let matches = true;
             for (const change of item.changes) {
-              if (await physicalPath(path.dirname(change.path)) !== change.parent || !sameContent(change.expected, await changeFingerprint(change, change.path))) matches = false;
+              if (await physicalPath(path.dirname(change.path)) !== change.parent || !sameCopy(change.expected, await changeFingerprint(change, change.path), path.join(change.parent, path.basename(change.path)))) matches = false;
             }
             this.observations[item.id] = { status: matches ? 'verified' : 'drifted', detail: matches ? '磁盘内容与已应用方案一致；当前会话是否加载未验证。' : '磁盘内容或路径已变化，与已应用方案不一致。', checkedAt, loaded: 'unknown' };
           } else if (!current) {
@@ -359,24 +361,39 @@ export class Workbench {
     }
     Object.assign(this.state.selection, decisions); await this.save(); return this.view();
   }
+  async previewText(relative, expectedHash, expectedBytes) {
+    const full = await this.storagePath(relative);
+    assert(await physicalPath(full) === path.resolve(this.plan.runPhysical, relative), '文件预览路径被重定向');
+    const handle = await fs.open(full, 'r'), hash = createHash('sha256'), chunks = [];
+    let bytes = 0;
+    try {
+      // Hash the very stream used for display, retaining only the preview prefix.
+      for await (const chunk of handle.createReadStream({ autoClose: false })) {
+        hash.update(chunk);
+        if (bytes < 200_000) chunks.push(chunk.subarray(0, 200_000 - bytes));
+        bytes += chunk.length;
+      }
+    } finally { await handle.close(); }
+    assert(bytes === expectedBytes && hash.digest('hex') === expectedHash, '冻结的文件预览已变化，请重新准备');
+    return Buffer.concat(chunks).toString('utf8');
+  }
   async details(id) {
     const item = this.item(id), files = [];
     if (item.revisionDraft) {
       const draft = item.revisionDraft;
       const file = { path: path.basename(draft.source), target: draft.source, index: 0, status: 'modified', binary: false, previewOnly: !draft.writable };
       for (const side of ['before', 'after']) {
-        const full = await this.storagePath(draft[side]);
-        assert(await physicalPath(full) === path.resolve(this.plan.runPhysical, draft[side]), '修订预览路径被重定向');
-        assert(await hashFile(full) === draft[side + 'Hash'], '冻结的规则修订预览已变化，请重新准备');
         file[side + 'Hash'] = draft[side + 'Hash']; file[side + 'Bytes'] = draft[side + 'Bytes'];
-        const handle = await fs.open(full, 'r');
-        try { const buffer = Buffer.alloc(Math.min(file[side + 'Bytes'], 200_000)); const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0); file[side] = buffer.subarray(0, bytesRead).toString('utf8'); } finally { await handle.close(); }
+        file[side] = await this.previewText(draft[side], file[side + 'Hash'], file[side + 'Bytes']);
         if (file[side + 'Bytes'] > 200_000) file.truncated = true;
       }
       files.push(file);
     }
     for (const [index, change] of item.changes.entries()) {
       if (change.type === 'file') continue; // revisionDraft already provides the frozen text diff.
+      for (const [root, expected] of [[change.snapshot, change.original], [change.candidate, change.expected]]) {
+        if (root) assert(sameCopy(expected, await fingerprint(await this.storagePath(root)), path.resolve(this.plan.runPhysical, root)), '冻结的技能预览已变化，请重新准备');
+      }
       const before = new Map((change.original?.entries || []).filter(f => f.type === 'file').map(f => [f.path, f]));
       const after = new Map((change.expected?.entries || []).filter(f => f.type === 'file').map(f => [f.path, f]));
       for (const name of [...new Set([...before.keys(), ...after.keys()])].sort()) {
@@ -386,8 +403,7 @@ export class Workbench {
         file.binary = !text;
         for (const [side, entry, root] of [['before', b, change.snapshot], ['after', a, change.candidate]]) {
           if (entry && text) {
-            const handle = await fs.open(path.join(this.runDir, root, name), 'r');
-            try { const buffer = Buffer.alloc(Math.min(entry.bytes, 200_000)); const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0); file[side] = buffer.subarray(0, bytesRead).toString('utf8'); } finally { await handle.close(); }
+            file[side] = await this.previewText(path.join(root, name), entry.hash, entry.bytes);
             if (entry.bytes > 200_000) file.truncated = true;
           } else file[side] = '';
         }
@@ -434,7 +450,16 @@ export class Workbench {
     let release;
     try { release = await this.acquire(); } catch (e) { this.busy = false; throw e; }
     const job = { id: randomUUID(), requestId: request.requestId, requestHash, kind, operationId: request.operationId || null, status: 'running', startedAt: new Date().toISOString(), items: items.map(i => ({ id: i.id, status: 'pending', steps: [] })) };
-    this.state.jobs.push(job); await this.save();
+    this.state.jobs.push(job);
+    try { await this.save(); }
+    catch (e) {
+      // No execution was started. Retain a terminal record even if the failed
+      // save reached disk; the same request must not silently replay later.
+      job.status = 'interrupted'; job.error = e.message; job.finishedAt = new Date().toISOString();
+      try { await this.save(); } catch { /* Keep the in-memory record if storage is still unavailable. */ }
+      finally { this.busy = false; await release(); }
+      throw e;
+    }
     this.pending = this.execute(job).finally(async () => { this.busy = false; await release(); });
     return job;
   }
@@ -443,7 +468,7 @@ export class Workbench {
     for (const change of item.changes) {
       assert(await physicalPath(path.dirname(change.path)) === change.parent, '技能父目录的链接目标已变化');
       assert(!(await protectedSource(change.path)), '来源现在属于插件或平台，已停止');
-      if (change.snapshot) assert(sameContent(change.original, await changeFingerprint(change, await this.storagePath(change.snapshot))), '原始快照损坏，未执行');
+      if (change.snapshot) assert(sameCopy(change.original, await changeFingerprint(change, await this.storagePath(change.snapshot)), path.resolve(this.plan.runPhysical, change.snapshot)), '原始快照损坏，未执行');
       if (!restoring) {
         const current = await changeFingerprint(change, change.path);
         assert(sameSource(change.original, current), `源内容或路径已变化，请重新审阅：${change.path}；差异：${changedFiles(change.original, current)}`);
@@ -479,7 +504,7 @@ export class Workbench {
       step.stage = 'archived'; await this.save();
       if (change.candidate) await move(await this.storagePath(step.staged), change.path);
       step.stage = 'installed'; await this.save();
-      assert(sameContent(change.expected, await changeFingerprint(change, change.path)), '应用后的文件与批准版本不一致');
+      assert(sameCopy(change.expected, await changeFingerprint(change, change.path), path.join(change.parent, path.basename(change.path))), '应用后的文件与批准版本不一致');
     }
   }
   async rollback(item, entry, job, recovery = false) {
@@ -501,13 +526,13 @@ export class Workbench {
       const change = item.changes[step.index], archived = await exists(await this.storagePath(step.archive));
       const current = await changeFingerprint(change, change.path);
       if (!archived && sameSource(change.original, current)) continue;
-      assert(current === null || sameContent(change.expected, current), `恢复冲突：${change.path} 存在后续修改；差异：${changedFiles(change.expected, current)}`);
+      assert(current === null || sameCopy(change.expected, current, path.join(change.parent, path.basename(change.path))), `恢复冲突：${change.path} 存在后续修改；差异：${changedFiles(change.expected, current)}`);
       if (change.original) {
         assert(archived, '原件归档缺失，停止恢复');
         if (change.original.link) {
           assert(await fs.readlink(path.join(this.runDir, step.archive)) === change.original.link, '原链接归档已变化');
-          assert(sameContent(change.original, await fingerprint(change.original.realPath)), '原链接目标已有更新，停止恢复');
-        } else assert(sameContent(change.original, await changeFingerprint(change, await this.storagePath(step.archive))), '归档原件已变化');
+          assert(sameCopy(change.original, await fingerprint(change.original.realPath), change.original.realPath), '原链接目标已有更新，停止恢复');
+        } else assert(sameCopy(change.original, await changeFingerprint(change, await this.storagePath(step.archive)), path.resolve(this.plan.runPhysical, step.archive)), '归档原件已变化');
       }
     }
     for (const step of [...entry.steps].reverse()) {
