@@ -1,0 +1,42 @@
+name: Bug report
+description: Report a reproducible problem using disposable data
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For vulnerabilities, use [private vulnerability reporting](https://github.com/facadefish/prune-skill/security/advisories/new). Do not post real review plans, private skill text, local paths, tokens, or credentials. Use disposable fixtures and redact logs or screenshots.
+  - type: input
+    id: version
+    attributes:
+      label: Prune version or commit
+      placeholder: v1.0.1
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Operating system, Node.js version, and Agent host/version if relevant.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Use a minimal disposable fixture. Include the exact command only if it contains no private paths or tokens.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and safe evidence
+      description: Include a sanitized error or screenshot if useful.
+    validations:
+      required: true
