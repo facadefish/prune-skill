@@ -12,6 +12,8 @@
   <a href="LICENSE">Apache-2.0</a>
 </p>
 
+<p align="center"><a href="https://github.com/facadefish/prune-skill/actions/workflows/ci.yml"><img src="https://github.com/facadefish/prune-skill/actions/workflows/ci.yml/badge.svg" alt="Windows、macOS、Linux CI 状态"></a></p>
+
 > **一句话理解：** Prune 会帮 Agent 找出值得保留、需要改写或适合停用的指令；它把依据、候选和差异交给你审阅。只有你在工作台选择并点击 **应用所选**，真实文件或受支持的插件配置才会改变。
 
 ## 你会得到什么
@@ -71,7 +73,7 @@ Agent 可用 `prepare --input <方案.json> --out <新工作目录>` 冻结方�
 
 ## 平台与边界
 
-- **操作系统：** 运行时使用 Node.js 标准库，目标平台为 Windows、macOS、Linux。Windows 与 Linux 的本机测试已通过；macOS 尚待 CI 验证。文件系统、符号链接和宿主配置可能因机器而异；请以实际读回状态为准。
+- **操作系统：** 运行时使用 Node.js 标准库，Windows、macOS、Linux 的 [CI](.github/workflows/ci.yml) 测试与双语打包已通过。文件系统、符号链接和宿主配置可能因机器而异；请以实际读回状态为准。
 - **宿主：** 核心技能审查与工作台不依赖 Codex 或 Claude Code 的插件 CLI。插件启停只在受支持的宿主/作用域开放：Codex 用户层本地插件；Claude Code 的 user、project、local 插件。接口不可用或目标无法唯一确认时，保留建议而不假装执行。
 - **本地性：** 工作台只监听 `127.0.0.1`，使用随机端口和运行目录里的令牌。无遥测、无自动上传、无常驻服务。真实审阅输入、历史记录和令牌不包含在仓库或发布包中。
 - **权限：** 准备方案不等于授权修改。只有用户对当前冻结方案的选择和 Apply 才能触发真实写入；Restore 同样由用户操作。不支持插件卸载、更新或内部改写。

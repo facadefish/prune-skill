@@ -12,6 +12,8 @@
   <a href="LICENSE">Apache-2.0</a>
 </p>
 
+<p align="center"><a href="https://github.com/facadefish/prune-skill/actions/workflows/ci.yml"><img src="https://github.com/facadefish/prune-skill/actions/workflows/ci.yml/badge.svg" alt="Windows, macOS, and Linux CI status"></a></p>
+
 > Prune does not edit a skill merely because an agent recommends it. The agent prepares a frozen plan; you inspect it in a local workbench and explicitly select **Apply** before a real file or supported plugin setting changes.
 
 ## What it does
@@ -71,7 +73,7 @@ The UI separates **accepted advice**, **verified disk/host configuration**, and 
 
 ## Compatibility and limits
 
-- **Operating systems:** Standard-library Node.js runtime targeting Windows, macOS, and Linux. Local Windows and Linux tests pass; macOS CI verification is pending. Filesystem and symlink behavior can vary; rely on readback and explicit error states.
+- **Operating systems:** Standard-library Node.js runtime; [CI](.github/workflows/ci.yml) tests and builds both language packages on Windows, macOS, and Linux. Filesystem and symlink behavior can vary; rely on readback and explicit error states.
 - **Hosts:** Core review and the workbench do not need a plugin CLI. Optional plugin controls support local user-scope Codex plugins and Claude Code user/project/local plugins where the host interface is available. Unsupported or ambiguous targets remain advice-only.
 - **Privacy:** The server binds only to `127.0.0.1` on a random port and uses a per-run token. No telemetry or automatic upload. Real plans, history, and tokens are never part of this repository or its release archives.
 - **Authority:** Preparation does not authorize mutation. The user must select and Apply the current frozen plan, and initiate Restore separately. Plugin uninstall, updates, and internal rewrites are unsupported.
