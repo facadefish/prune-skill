@@ -6,7 +6,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { preparePluginControl, readPluginState, setPluginEnabled } from './plugin-host.mjs';
 
 export const digest = value => createHash('sha256').update(typeof value === 'string' ? value : JSON.stringify(value)).digest('hex');
-export const exists = async p => !!(await fs.lstat(p).catch(e => { if (e.code !== 'ENOENT') throw e; return null; }));
+export const exists = async p => !!(await fs.lstat(p).catch(e => { if (e.code !== 'ENOENT' && e.code !== 'ENOTDIR') throw e; return null; }));
 export const inside = (root, file) => { const r = path.relative(path.resolve(root), path.resolve(file)); return r === '' || (!r.startsWith(`..${path.sep}`) && r !== '..' && !path.isAbsolute(r)); };
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
 export async function writeJSON(file, value) {

@@ -71,7 +71,7 @@ The UI separates **accepted advice**, **verified disk/host configuration**, and 
 
 ## Compatibility and limits
 
-- **Operating systems:** Standard-library Node.js runtime targeting Windows, macOS, and Linux. Filesystem and symlink behavior can vary; rely on readback and explicit error states.
+- **Operating systems:** Standard-library Node.js runtime targeting Windows, macOS, and Linux. Local Windows and Linux tests pass; macOS CI verification is pending. Filesystem and symlink behavior can vary; rely on readback and explicit error states.
 - **Hosts:** Core review and the workbench do not need a plugin CLI. Optional plugin controls support local user-scope Codex plugins and Claude Code user/project/local plugins where the host interface is available. Unsupported or ambiguous targets remain advice-only.
 - **Privacy:** The server binds only to `127.0.0.1` on a random port and uses a per-run token. No telemetry or automatic upload. Real plans, history, and tokens are never part of this repository or its release archives.
 - **Authority:** Preparation does not authorize mutation. The user must select and Apply the current frozen plan, and initiate Restore separately. Plugin uninstall, updates, and internal rewrites are unsupported.

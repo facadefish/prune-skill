@@ -2,7 +2,7 @@
 name: prune
 description: Review or revise specified skills, related prompts, and project instructions; present recommendations for skills, whole plugins, and rules in the Prune workbench for the user to choose. Use for explicit skill audits or instruction cleanup, not ordinary code refactoring.
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 ---
 
 # Prune

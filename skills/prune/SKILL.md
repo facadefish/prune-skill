@@ -2,7 +2,7 @@
 name: prune
 description: 审查或改写指定 skills、相关提示词与项目规则，通过修剪工作台呈现技能、完整插件与规则的取舍建议，供用户选择。用于明确要求技能审查、指令精简或候选修订；不用于普通代码精简。
 metadata:
-  version: "1.0.0"
+  version: "1.0.1"
 ---
 
 # Prune
