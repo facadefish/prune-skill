@@ -2,6 +2,7 @@ node_modules/
 .release/
 .prune-demo/
 .prune/
+.agents/skills/open-source-maintainer/
 runs/
 *.log
 *.local.json
