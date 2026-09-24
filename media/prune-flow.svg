@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="330" viewBox="0 0 1200 330" role="img" aria-labelledby="title desc">
+  <title id="title">Prune — keep the useful parts</title>
+  <desc id="desc">A local workbench for reviewing skills, choosing changes, applying them, and restoring them.</desc>
+  <defs>
+    <linearGradient id="paper" x2="1" y2="1">
+      <stop stop-color="#f8f5ed"/>
+      <stop offset="1" stop-color="#ebe9df"/>
+    </linearGradient>
+    <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1" fill="#d5d8ca"/>
+    </pattern>
+  </defs>
+  <rect width="1200" height="330" rx="26" fill="url(#paper)"/>
+  <rect width="1200" height="330" rx="26" fill="url(#dots)" opacity=".65"/>
+  <path d="M842 0h358v330H720c118-67 172-172 122-330Z" fill="#dbe5d9" opacity=".76"/>
+  <path d="M892 270c72-76 92-169 54-246M924 205c77-27 127-83 145-159M881 201c-52-39-70-101-57-155" fill="none" stroke="#527968" stroke-width="8" stroke-linecap="round"/>
+  <path d="M877 195c-29-16-49-43-55-77 36 4 62 24 72 55M934 172c45-8 79-36 97-78-46 1-82 23-101 62M934 89c-22-15-37-38-40-66 28 6 48 23 58 47" fill="#719982" opacity=".9"/>
+  <circle cx="769" cy="235" r="39" fill="#f9faf5" stroke="#3f6254" stroke-width="5"/>
+  <circle cx="808" cy="272" r="39" fill="#f9faf5" stroke="#3f6254" stroke-width="5"/>
+  <path d="M794 248 870 158M828 259l59-95" stroke="#3f6254" stroke-width="8" stroke-linecap="round"/>
+  <path d="m862 169 32-20-8 34" fill="#3f6254"/>
+  <text x="68" y="88" font-family="Arial, sans-serif" font-size="20" letter-spacing="5" font-weight="700" fill="#517767">REVIEW WITH INTENT</text>
+  <text x="64" y="205" font-family="Georgia, serif" font-size="106" font-weight="700" fill="#273a35">Prune</text>
+  <text x="69" y="264" font-family="Arial, sans-serif" font-size="27" fill="#52615b">Keep the useful parts. Choose every change.</text>
+  <path d="M64 296h578" stroke="#97ad9b" stroke-width="2"/>
+</svg>

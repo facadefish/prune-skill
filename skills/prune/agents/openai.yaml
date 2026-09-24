@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prune"
+  short_description: "按任务审查技能与完整插件，保留有用能力，并按请求准备指令修订"
+  default_prompt: "使用 $prune 按我的任务与模型审查指定技能及相关指令，在修剪工作台展示有原文依据的取舍；如果我要求实施修剪或优化，准备完整候选和文件差异，让我选择应用。"

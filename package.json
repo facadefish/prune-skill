@@ -1,0 +1,15 @@
+{
+  "name": "prune-skill",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "test": "node --test",
+    "check:public": "node scripts/check-public.mjs",
+    "check": "npm run check:public && npm test",
+    "package:skills": "node scripts/package-prune.mjs"
+  }
+}

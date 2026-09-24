@@ -1,0 +1,4 @@
+interface:
+  display_name: "Prune"
+  short_description: "Review skills; prepare focused revisions when requested"
+  default_prompt: "Use $prune to review the specified skills and related instructions for my tasks and model, showing source-backed recommendations in the workbench. If I ask to implement pruning or optimization, prepare complete candidates and file differences for me to review and apply."

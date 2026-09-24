@@ -1,0 +1,1971 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Prune · 技能树与裁剪台</title>
+<style>
+:root{color-scheme:light;--paper:#F0F0E9;--ink:#242420;--line:#34342F;--muted:#6F7069;
+  --ease:cubic-bezier(.22,1,.36,1);--nav-h:64px;--bar-h:64px;--banner-h:0px}
+*{box-sizing:border-box}html,body{margin:0}
+body{background:var(--paper);color:var(--ink);
+  font:15px/1.7 "Noto Sans SC","Microsoft YaHei",system-ui,sans-serif}
+code,pre,.mono{font-family:Consolas,"Courier New",monospace;font-size:14px}
+button{font:inherit;cursor:pointer;border:1px solid var(--line);border-radius:0;
+  background:transparent;color:var(--ink);padding:8px 16px;min-height:44px}
+button.primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+button:disabled{opacity:.4;cursor:not-allowed}
+:focus-visible{outline:3px solid var(--ink);outline-offset:3px}
+/* 骨架布局:64px 导航 / 主区 / 64px 待应用栏,具体组件样式由后续任务追加 */
+#app-nav{height:var(--nav-h);display:flex;align-items:stretch;border-bottom:1px solid var(--line)}
+#app-nav .brand{padding:0 24px;display:flex;align-items:center;font-size:18px;border-right:1px solid var(--line)}
+#app-nav nav{display:flex}
+#app-nav nav button{border:0;border-right:1px solid var(--line);padding:0 32px;font-size:16px}
+#app-nav nav button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+#connBadge{margin-left:auto;display:flex;align-items:center;gap:8px;padding:0 24px;
+  border-left:1px solid var(--line);color:var(--muted);font-size:13px}
+#connBadge.off{color:var(--ink)}
+#view{position:fixed;top:var(--nav-h);bottom:calc(var(--bar-h) + env(safe-area-inset-bottom));left:0;right:0;overflow:auto}
+#pendingBar{position:fixed;left:0;right:0;bottom:0;height:calc(var(--bar-h) + env(safe-area-inset-bottom));
+  border-top:1px solid var(--line);display:flex;align-items:center;gap:16px;padding:0 24px;
+  padding-bottom:env(safe-area-inset-bottom);background:var(--paper)}
+#pendingBar .spacer{flex:1}
+#pendingSummary{line-height:1.4;flex-shrink:0}
+.chip{display:inline-flex;align-items:center;gap:8px;border:1px solid var(--line);padding:4px 12px;font-size:13px}
+#toast{position:fixed;top:calc(var(--nav-h) + var(--banner-h) + 12px);left:50%;transform:translateX(-50%);
+  z-index:30;max-width:min(640px,calc(100vw - 32px));background:var(--paper);border:1px solid var(--line);
+  padding:12px 20px;font-size:14px;box-shadow:none;display:flex;align-items:flex-start;gap:12px}
+#toast[hidden]{display:none}
+#toast.error{border-style:double}
+#toastClose{border:0;min-height:0;padding:0 2px;font-size:16px;line-height:1.5;flex:0 0 auto}
+#loading{position:fixed;inset:var(--nav-h) 0 0 0;z-index:40;background:var(--paper);display:grid;
+  place-content:center;text-align:center;gap:16px}
+#loading[hidden]{display:none}
+#loading .wordmark{font-size:28px;letter-spacing:.3em}
+body.reduced *{transition-duration:.08s!important;animation:none!important}
+/* Task 3: 技能树视图 */
+.tree-view{display:flex;flex-direction:column;height:100%;overflow:hidden}
+.tree-toolbar{height:56px;flex:0 0 56px;display:flex;align-items:center;gap:12px;
+  padding:0 16px;border-bottom:1px solid var(--line);font-size:14px;overflow:hidden}
+.tree-toolbar .crumb{font-size:15px;white-space:nowrap}
+.tree-toolbar input[type=search]{font:inherit;height:36px;padding:0 10px;width:200px;
+  border:1px solid var(--line);border-radius:0;background:var(--paper);color:var(--ink)}
+.tree-toolbar select{font:inherit;height:36px;border:1px solid var(--line);border-radius:0;
+  background:var(--paper);color:var(--ink)}
+.tree-toolbar .spacer{flex:1}
+.tree-toolbar .count{color:var(--muted);font-size:13px;white-space:nowrap}
+.tree-toolbar button{min-height:36px;padding:4px 12px;font-size:13px}
+.tree-toolbar button.linklike{border:0;text-decoration:underline}
+.plan-notice{font-size:13px;line-height:1.6;color:var(--muted);overflow-wrap:anywhere}
+.tree-view>.plan-notice{margin:0;padding:10px 24px;border-bottom:1px solid var(--line)}
+.tree-stage{position:relative;flex:1;overflow:hidden}
+.tree-stage>svg{display:block;width:100%;height:100%;cursor:grab;touch-action:none}
+.tree-stage>svg.panning{cursor:grabbing}
+.t-trunk{fill:none;stroke:var(--ink);stroke-width:9;stroke-linecap:round}
+.t-rootlet{fill:none;stroke:var(--ink);stroke-width:3;stroke-linecap:round}
+.t-conn{fill:none;stroke:var(--line);stroke-width:2.5}
+.tnode,.t-conn,.t-glabel{transition:opacity .18s var(--ease)}
+.tnode{cursor:pointer;transform-box:fill-box;transform-origin:center}
+.tnode circle.body{fill:var(--paper);stroke:var(--ink);stroke-width:2.5;
+  transform-box:fill-box;transform-origin:center;
+  transition:transform .18s var(--ease),fill .18s var(--ease)}
+.tnode circle.hot{fill:transparent;pointer-events:all} /* 透明热区 r≥34,置于节点最上层 */
+.tnode.adv-undetermined circle.body{stroke-dasharray:5 4}
+.tnode.more circle.body{stroke:var(--muted);stroke-dasharray:4 4}
+.tnode text{fill:var(--ink);font-size:15px;pointer-events:none}
+.tnode text.sub{fill:var(--muted);font-size:12.5px}
+.tnode.more text{fill:var(--muted);font-size:12px}
+.tnode.grp text{font-size:14px}
+.tnode.grp text.sub{font-size:11.5px}
+.tnode .ico{fill:none;stroke:var(--ink);stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+.tnode .ico text{fill:var(--ink);stroke:none;font-size:15px}
+.tnode .ring{fill:none;stroke:var(--ink);stroke-width:2;opacity:0;transform-box:fill-box;
+  transform-origin:center;transition:opacity .18s var(--ease),transform .18s var(--ease)}
+.tnode:hover .ring,.tnode:focus-visible .ring{opacity:.6} /* hover 环反馈 */
+.tnode.sel .ring{opacity:1}
+.tnode.sel circle.body{fill:var(--ink);transform:scale(1.05)}
+.tnode.sel .ico{stroke:var(--paper)}
+.tnode.sel .ico text{fill:var(--paper)}
+.tnode:active circle.body{transform:scale(.94)}
+.tnode:focus{outline:none}
+.tnode:focus-visible .ring{transform:scale(1.08)}
+.tnode.dim{opacity:.22}
+.tnode.hit circle.body{transform:scale(1.1)}
+.tnode .badge{opacity:0;transform-box:fill-box;transform-origin:center;transition:opacity .18s var(--ease)}
+.tnode.approved .badge{opacity:1} /* 已采纳:墨线环 + 对勾标 */
+.tnode.approved .ring{opacity:.9}
+.tnode.adopt-flash .badge{animation:badgePop .18s var(--ease)}
+.tnode.adopt-flash .ring{animation:ringIn .18s var(--ease)}
+@keyframes badgePop{from{opacity:0;transform:scale(.4)}}
+@keyframes ringIn{from{opacity:0;transform:scale(.7)}}
+.t-glabel text{fill:var(--ink);font-size:14px;pointer-events:none}
+.t-glabel text.sub{fill:var(--muted);font-size:12px}
+.soft{opacity:.35}
+/* 入场:仅首次,播完由 JS 移除 .enter;枝干 pathLength=1 描绘生长,叶按分组错峰 30ms pop,总时长 ≤800ms */
+.enter path.t-grow{stroke-dasharray:1;stroke-dashoffset:1;animation:tGrow .5s var(--ease) forwards}
+.enter g.t-grow,.enter text.t-grow{opacity:0;animation:tIn .42s var(--ease) forwards}
+.enter .t-stub{opacity:0;animation:tIn .42s var(--ease) forwards}
+.enter .t-leaf{opacity:0;transform:scale(.3);animation:tPop .46s var(--ease) forwards}
+@keyframes tGrow{to{stroke-dashoffset:0}}
+@keyframes tIn{to{opacity:1}}
+@keyframes tPop{to{opacity:1;transform:scale(1)}}
+/* 修剪动效:停用断枝飘落 780ms 留虚线残枝;修改 400ms 缩放回弹再生;恢复 300ms 接回/回实 */
+.t-fall{transform-box:fill-box;transform-origin:center;pointer-events:none;
+  animation:leafFall .78s var(--ease) forwards}
+@keyframes leafFall{to{transform:translateY(60px) rotate(9deg);opacity:0}}
+.t-stub{stroke-dasharray:5 5}
+.tnode.pruned .stub-mark{fill:var(--paper);stroke:var(--muted);stroke-width:2;stroke-dasharray:4 3}
+.tnode.pruned .stub-cut{stroke:var(--muted);stroke-width:2;stroke-linecap:round}
+.tnode.pruned .stub-name{fill:var(--muted);font-size:13px}
+.tnode.pruned:hover .stub-mark,.tnode.pruned:focus-visible .stub-mark{stroke:var(--ink)}
+.tnode.pruned:hover .stub-name,.tnode.pruned:focus-visible .stub-name{fill:var(--ink)}
+.tnode.pruned.sel .stub-mark{stroke:var(--ink);stroke-width:2.5}
+.tnode.applied-mod circle.body{stroke-dasharray:6 4} /* 修改已应用:虚环 */
+.tnode.regen circle.body{animation:regenPop .4s var(--ease)}
+@keyframes regenPop{0%{opacity:0;transform:scale(.5)}70%{transform:scale(1.07)}100%{opacity:1;transform:scale(1)}}
+.t-regrow{stroke-dasharray:1;stroke-dashoffset:1;animation:tGrow .3s var(--ease) forwards}
+.tnode.restore-pop{animation:tPop .3s var(--ease)}
+.tree-legend{position:absolute;left:16px;bottom:12px;display:flex;gap:16px;align-items:center;
+  font-size:13px;color:var(--muted);background:var(--paper);padding:4px 10px;border:1px solid var(--line)}
+.tree-legend svg{vertical-align:-4px;margin-right:6px;fill:none;stroke:var(--ink);
+  stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.tree-legend svg text{fill:var(--ink);stroke:none;font-size:15px}
+.tree-zoom{position:absolute;right:16px;bottom:12px;display:flex;gap:6px;align-items:center}
+.tree-zoom button{min-height:36px;min-width:40px;padding:4px 10px;font-size:13px;background:var(--paper)}
+.tree-zoom .pct{min-width:58px}
+.tree-zoom button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+#inspector{position:absolute;top:0;right:0;bottom:0;width:320px;background:var(--paper);
+  border-left:1px solid var(--line);padding:20px;overflow:auto;
+  transform:translateX(16px);opacity:0;pointer-events:none;
+  transition:transform .28s var(--ease),opacity .28s var(--ease)}
+#inspector.open{transform:none;opacity:1;pointer-events:auto}
+#inspector h2{margin:0 36px 8px 0;font-size:20px;line-height:1.3;word-break:break-all}
+#inspector .ins-close{position:absolute;top:10px;right:10px;border:0;min-height:36px;padding:2px 10px;font-size:16px}
+#inspector .ins-rows{margin:14px 0;border-top:1px solid var(--line)}
+#inspector .ins-row{display:flex;justify-content:space-between;gap:12px;padding:8px 0;
+  border-bottom:1px solid var(--line);font-size:14px}
+#inspector .ins-row>span:first-child{color:var(--muted);white-space:nowrap}
+#inspector .ins-sum{font-size:14px;margin:0 0 12px}
+#inspector .ins-outcome{font-size:13px;color:var(--muted);margin:0 0 12px}
+#inspector .ins-pills{display:flex;gap:8px;flex-wrap:wrap;margin:2px 0 0}
+#inspector .ins-sec{display:flex;gap:10px;margin:0 0 14px}
+#inspector .ins-sec>svg{flex:0 0 18px;margin-top:2px;fill:none;stroke:var(--ink);
+  stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round}
+#inspector .ins-sec h3{margin:0 0 2px;font-size:13px;color:var(--muted);font-weight:normal}
+#inspector .ins-sec p{margin:0;font-size:14px;word-break:break-all}
+#inspector .ins-diff{width:100%;margin-top:4px}
+#inspector .ins-actions{display:flex;gap:10px;margin-top:16px}
+#inspector .ins-actions button{flex:1;padding:8px 6px}
+/* Task 4: 裁剪台 · 对象目录与总览 */
+.muted{color:var(--muted)}
+.cut-view{display:flex;height:100%;overflow:hidden}
+.cut-catalog{width:220px;flex:0 0 220px;border-right:1px solid var(--line);
+  display:flex;flex-direction:column;min-height:0}
+.cut-catalog h2{margin:0;padding:14px 16px 8px;font-size:15px}
+.cat-search{padding:0 12px 10px;border-bottom:1px solid var(--line)}
+.cat-search input{width:100%;font:inherit;height:36px;padding:0 10px;
+  border:1px solid var(--line);border-radius:0;background:var(--paper);color:var(--ink)}
+.cat-groups{flex:1;overflow:auto;padding:6px 0 12px;min-height:0}
+.cat-head{display:flex;align-items:center;gap:6px;width:100%;border:0;min-height:38px;
+  padding:6px 14px;font-size:14px;text-align:left}
+.cat-head .arrow{width:12px;color:var(--muted)}
+.cat-head .n{margin-left:auto;font-size:12px;color:var(--muted)}
+.cat-list{display:grid}
+.cat-item{display:block;width:100%;border:0;text-align:left;min-height:0;
+  padding:5px 14px 5px 32px;font-size:14px;word-break:break-all}
+.cat-item .src{display:block;font-size:12px;color:var(--muted)}
+.cat-item[aria-current="true"]{box-shadow:inset 3px 0 0 var(--ink)}
+.cat-empty{padding:12px 16px;font-size:13px}
+.cut-main{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0}
+.cut-head{padding:18px 24px 12px}
+.cut-head h1{margin:0;font-size:26px;line-height:1.3}
+.cut-head p{margin:4px 0 0;font-size:14px}
+.cut-head .adv-counts{color:var(--muted)}
+.cut-toolbar{position:relative;flex:0 0 56px;display:flex;align-items:center;gap:12px;
+  padding:0 24px;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.cut-toolbar input[type=search]{font:inherit;height:36px;padding:0 10px;width:min(300px,50%);
+  border:1px solid var(--line);border-radius:0;background:var(--paper);color:var(--ink)}
+.cut-toolbar .spacer{flex:1}
+.cut-toolbar button{min-height:36px;padding:4px 14px;font-size:14px}
+.cut-filter-wrap{position:relative}
+.cut-filter-pop{position:absolute;top:calc(100% + 8px);right:0;z-index:25;width:260px;
+  display:grid;gap:10px;background:var(--paper);border:1px solid var(--line);padding:14px}
+.cut-filter-pop label{display:grid;gap:4px;font-size:13px;color:var(--muted)}
+.cut-filter-pop select{font:inherit;height:34px;border:1px solid var(--line);border-radius:0;
+  background:var(--paper);color:var(--ink)}
+/* 对象总览:卡片网格(图04);桌面 ≥1200px 两列,以下单列;首载 120ms 交叉淡入 */
+.cut-list{flex:1;overflow:auto;padding:16px 24px;min-height:0;
+  display:grid;grid-template-columns:1fr;gap:14px;align-content:start}
+@media (min-width:1200px){.cut-list{grid-template-columns:1fr 1fr}}
+.cut-row{display:flex;align-items:stretch;border:1px solid var(--line);background:var(--paper)}
+.cut-row:hover{border-color:var(--ink)}
+.cut-row[aria-current="true"]{box-shadow:inset 3px 0 0 var(--ink)}
+.cut-ico{flex:0 0 auto;display:grid;place-content:center;padding:14px 4px 14px 18px}
+.cut-info{flex:1;min-width:0;padding:14px 18px}
+.cut-name{font-size:18px;display:flex;flex-direction:column;align-items:flex-start;gap:6px}
+.cut-name .chip{font-size:12px;padding:2px 8px}
+.cut-facts{display:grid;gap:2px;margin:8px 0 0;font-size:13px}
+.cut-fact{display:flex;gap:6px}
+.cut-fact dt{color:var(--muted)}
+.cut-fact dd{margin:0}
+.cut-open-cell{flex:0 0 auto;display:flex;align-items:center;border-left:1px solid var(--line);padding:0 20px}
+.cut-open{flex:0 0 auto;white-space:nowrap}
+.cut-empty{flex:1;display:grid;place-content:center;justify-items:center;gap:12px;
+  text-align:center;padding:24px}
+.cut-empty strong{font-size:20px}
+.cut-empty p{margin:0;color:var(--muted)}
+.cut-foot{flex:0 0 auto;padding:8px 24px;font-size:13px;color:var(--muted);
+  border-top:1px solid var(--line)}
+/* Task 5: 裁剪台 · 对象详情(建议/文件差异/依据与验证) */
+.detail-head{padding:14px 24px 0}
+.detail-head .back{border:0;text-decoration:underline;padding:0;min-height:0;font-size:14px}
+.detail-head h1{margin:6px 0 2px;font-size:26px;line-height:1.3;word-break:break-all}
+.detail-paths{margin:2px 0 0;font-size:12.5px;color:var(--muted);word-break:break-all}
+.detail-pills{display:flex;gap:8px;flex-wrap:wrap;margin:10px 0 0}
+.detail-outcome{margin:6px 0 0;font-size:13px;color:var(--muted)}
+.detail-sum{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+  border:1px solid var(--line);margin:14px 24px 0}
+.detail-sum>section{padding:10px 14px;min-width:0}
+.detail-sum>section+section{border-left:1px solid var(--line)}
+.detail-sum h3{margin:0 0 4px;font-size:13px;color:var(--muted);font-weight:normal}
+.detail-sum p,.detail-sum ul{margin:0;font-size:14px}
+.detail-sum ul{padding-left:18px}
+.detail-tabs{flex:0 0 auto;display:flex;border-top:1px solid var(--line);
+  border-bottom:1px solid var(--line);margin-top:14px}
+.detail-tabs [role=tab]{border:0;border-right:1px solid var(--line);min-height:44px;
+  padding:8px 28px;font-size:15px;background:transparent}
+.detail-tabs [role=tab][aria-selected="true"]{background:var(--ink);color:var(--paper)}
+.detail-body{flex:1;min-height:0;overflow:auto;padding:18px 24px 28px}
+.detail-body.diffs{overflow:hidden;padding:0;display:flex}
+.fade-in{animation:dIn .14s var(--ease)}
+@keyframes dIn{from{opacity:0}}
+.detail-actions{flex:0 0 var(--bar-h);display:flex;align-items:center;justify-content:flex-end;
+  gap:12px;padding:0 24px;border-top:1px solid var(--line)}
+.detail-actions .hint{margin-right:auto;font-size:13px;color:var(--muted)}
+.note-box{border:1px solid var(--line);padding:12px 16px;font-size:14px;margin:0 0 14px}
+.note-box h3{margin:0 0 4px;font-size:14px}
+.ev-quote{border-left:3px solid var(--ink);padding:6px 14px;margin:0 0 6px;font-size:15px}
+.ev-src{font-size:12.5px;color:var(--muted);margin:0 0 14px}
+.ev-sec{margin:0 0 18px}
+.ev-sec h3,.ev-sec summary{margin:0 0 8px;font-size:14px}
+.ev-sec summary{cursor:pointer}
+.ev-row{display:flex;justify-content:space-between;gap:16px;padding:8px 0;
+  border-bottom:1px solid var(--line);font-size:14px}
+.ev-row .st{white-space:nowrap}
+/* 文件差异:目录 + 双栏 */
+.diff-layout{flex:1;display:flex;min-height:0;min-width:0;border-top:0}
+.diff-files{width:200px;flex:0 0 200px;border-right:1px solid var(--line);overflow:auto;min-height:0}
+.diff-files h3{margin:0;padding:12px 12px 6px;font-size:13px;color:var(--muted);font-weight:normal}
+.diff-group-head{padding:8px 12px 2px;font-size:12px;color:var(--muted);
+  word-break:break-all;border-top:1px solid var(--line)}
+.file-btn{display:block;width:100%;border:0;text-align:left;padding:8px 12px;
+  font-size:13px;word-break:break-all;min-height:0}
+.file-btn[aria-current="true"]{box-shadow:inset 3px 0 0 var(--ink)}
+.file-btn .st{display:block;font-size:12px;color:var(--muted)}
+.diff-main{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden}
+.diff-trunc{flex:0 0 auto;border-bottom:1px solid var(--line);padding:6px 12px;font-size:13px}
+.diff-cols{flex:1;display:grid;grid-template-columns:1fr 1fr;min-height:0}
+.diff-pane{overflow:auto;min-width:0;min-height:0}
+.diff-pane+.diff-pane{border-left:1px solid var(--line)}
+.diff-pane .ph{position:sticky;top:0;z-index:1;display:flex;justify-content:space-between;gap:12px;
+  padding:8px 12px;border-bottom:1px solid var(--line);font-size:13px;background:var(--paper)}
+.diff-pane .ph .muted{word-break:break-all}
+.dl{display:flex;font-family:Consolas,"Courier New",monospace;font-size:14px;
+  line-height:1.6;white-space:pre}
+.dl .no{flex:0 0 auto;width:44px;text-align:right;padding-right:10px;
+  color:var(--muted);user-select:none}
+.dl .mk{flex:0 0 auto;width:18px;user-select:none}
+.dl.del{color:var(--muted)}
+button.dl.fold{border:0;width:100%;min-height:0;padding:0;text-align:left;
+  color:var(--muted);font-family:Consolas,"Courier New",monospace;font-size:13px}
+button.dl.fold .tx{text-decoration:underline}
+.diff-empty{display:grid;place-content:center;height:100%;color:var(--muted);
+  font-size:13px;padding:24px;text-align:center}
+.diff-void{flex:1;display:grid;place-content:center;color:var(--muted);font-size:14px;
+  padding:24px;text-align:center}
+.bin-scroll{flex:1;overflow:auto;padding:16px 24px;min-height:0}
+.bin-cols{display:grid;grid-template-columns:1fr 1fr;border:1px solid var(--line);margin:0 0 12px}
+.bin-card{padding:12px 16px;min-width:0}
+.bin-card+.bin-card{border-left:1px solid var(--line)}
+.bin-card h3{margin:0 0 8px;font-size:14px}
+.bin-rows{margin:0;display:grid;gap:6px;font-size:13px}
+.bin-rows>div{display:flex;gap:10px}
+.bin-rows dt{color:var(--muted);flex:0 0 64px}
+.bin-rows dd{margin:0;word-break:break-all}
+/* Task 6: 待应用清单覆盖层与应用流程 */
+#pendingLayer{position:fixed;top:var(--nav-h);left:0;right:0;bottom:0;z-index:20;background:var(--paper);
+  display:flex;flex-direction:column;opacity:0;transform:translateY(8px);visibility:hidden;pointer-events:none;
+  transition:opacity .24s var(--ease),transform .24s var(--ease),visibility 0s linear .24s}
+#pendingLayer.open{opacity:1;transform:none;visibility:visible;pointer-events:auto;
+  transition:opacity .24s var(--ease),transform .24s var(--ease)}
+.pl-scroll{flex:1;overflow:auto;padding:18px 32px 28px;min-height:0}
+.pl-foot{flex:0 0 auto;min-height:calc(var(--bar-h) + env(safe-area-inset-bottom));display:flex;align-items:center;gap:16px;padding:0 32px;
+  padding-bottom:env(safe-area-inset-bottom);border-top:1px solid var(--line)}
+.pl-foot .spacer{flex:1}
+.pl-foot .pl-run{font-size:13px;color:var(--muted)}
+.pl-crumb{border:0;text-decoration:underline;padding:0;min-height:0;font-size:14px}
+#pendingLayer h1{margin:8px 0 2px;font-size:26px;line-height:1.3}
+.pl-sub{margin:0 0 16px;font-size:14px;color:var(--muted)}
+.pl-note{display:flex;gap:10px;align-items:center;border:1px solid var(--line);
+  padding:10px 16px;font-size:14px;margin:0 0 18px}
+.pl-note::before{content:'!';flex:0 0 20px;height:20px;border:1px solid var(--ink);
+  display:grid;place-content:center;font-size:12px}
+.pl-sec{margin:0 0 22px}
+.pl-sec h2{margin:0 0 8px;font-size:16px}
+.pl-sec .pl-cap{margin:0 0 8px;font-size:13px;color:var(--muted)}
+.pl-table{width:100%;border-collapse:collapse;font-size:14px}
+.pl-table th,.pl-table td{border:1px solid var(--line);padding:8px 12px;text-align:left;
+  vertical-align:top;font-weight:normal}
+.pl-table th{color:var(--muted);font-size:13px;white-space:nowrap}
+.pl-table button{min-height:32px;padding:2px 10px;font-size:13px}
+.pl-flash{animation:rowFlash .16s var(--ease)}
+@keyframes rowFlash{from{opacity:.25}}
+.run-line{width:150px;height:2px;background:var(--line);margin:10px 0 18px;position:relative;overflow:hidden}
+.run-line>i{position:absolute;left:0;top:0;bottom:0;width:36px;background:var(--ink);opacity:.55}
+.run-line.done>i{width:100%;opacity:1}
+.pl-err{font-size:13px;word-break:break-all;margin:0}
+.pl-detail{margin:6px 0 0;font-size:13px;color:var(--muted)}
+.pl-detail summary{cursor:pointer;color:var(--ink)}
+.pl-detail p{margin:6px 0 0;word-break:break-all}
+/* Task 7: 历史与恢复 */
+.hist-view{padding:18px 32px 28px}
+.hist-view h1{margin:0 0 4px;font-size:26px;line-height:1.3}
+.hist-job{border:1px solid var(--line);margin:0 0 14px}
+.hist-job-head{display:flex;align-items:center;gap:18px;width:100%;border:0;min-height:52px;
+  padding:8px 16px;font-size:15px;text-align:left;background:transparent}
+.hist-job-head .arrow{width:12px;color:var(--muted)}
+.hist-job-head .time{color:var(--muted);font-size:13px}
+.hist-job-head .st{margin-left:auto;white-space:nowrap}
+.hist-job-body{border-top:1px solid var(--line);padding:12px 16px}
+.hist-job-body .pl-table button{min-height:32px;padding:2px 10px;font-size:13px}
+.hist-job-foot{display:flex;align-items:center;gap:14px;padding:10px 16px;border-top:1px solid var(--line)}
+.hist-job-foot .info{margin-right:auto;font-size:13px;color:var(--muted)}
+.hist-view input[type=checkbox]{width:18px;height:18px;accent-color:var(--ink);cursor:pointer}
+.hist-view input[type=checkbox]:disabled{cursor:not-allowed;opacity:.4}
+.hist-empty{min-height:60%;display:grid;place-content:center;justify-items:center;gap:12px;
+  text-align:center;padding:48px 24px}
+.hist-empty strong{font-size:20px}
+.hist-empty p{margin:0;color:var(--muted)}
+/* Task 8: 断线条带(图20,120ms 切换,不遮挡阅读)与首次淡入 */
+#offlineBanner{position:fixed;top:var(--nav-h);left:0;right:0;z-index:15;display:flex;align-items:center;
+  gap:10px;min-height:40px;padding:4px 24px;border-bottom:1px solid var(--line);background:var(--paper);
+  font-size:14px;opacity:0;transform:translateY(-4px);visibility:hidden;pointer-events:none;
+  transition:opacity .12s linear,transform .12s linear,visibility 0s linear .12s}
+#offlineBanner.show{opacity:1;transform:none;visibility:visible;
+  transition:opacity .12s linear,transform .12s linear}
+#offlineBanner::before{content:'i';flex:0 0 18px;height:18px;border:1px solid var(--ink);border-radius:50%;
+  display:grid;place-content:center;font-size:12px}
+#view{transition:top .12s linear}
+body.offline #view{top:calc(var(--nav-h) + var(--banner-h))} /* M-2:--banner-h 由 JS 按条带实际高度写入,窄屏折行不压内容 */
+.first-in{animation:viewIn .48s var(--ease)} /* 读取成功后一次淡入,只播一次 */
+@keyframes viewIn{from{opacity:0}}
+/* Task 9: 动效编排(DESIGN §6)——树→裁剪台 320ms 同一标题位置连续过渡 + 其余 120ms 交叉淡入;
+   采纳成功 180ms 状态强调;恢复成功 220ms 内三事实字段依次稳定更新(0/40/80ms 错峰 + 140ms 淡入) */
+.x-in{animation:xIn .12s var(--ease)}
+@keyframes xIn{from{opacity:0}}
+.fly-title{position:fixed;z-index:35;margin:0;padding:0;pointer-events:none;color:var(--ink);
+  font-weight:700;line-height:1.3;white-space:nowrap;transform-origin:0 0;
+  transition:transform .32s var(--ease),opacity .08s linear .24s}
+.pd-flash{animation:pdIn .18s var(--ease)}
+@keyframes pdIn{from{opacity:.15}}
+.rst-f{animation:rstIn .14s var(--ease) both}
+.rst-f.d1{animation-delay:.04s}
+.rst-f.d2{animation-delay:.08s}
+@keyframes rstIn{from{opacity:.15}}
+#motionToggleBtn{border:0;border-left:1px solid var(--line);padding:0 20px;font-size:13px;min-height:0}
+#motionToggleBtn[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+/* Task 8: 方案范围页(图19,全部只读) */
+.scope-view{padding:18px 32px 28px;max-width:1180px}
+.scope-view>.back{border:0;text-decoration:underline;padding:0;min-height:0;font-size:14px}
+.scope-view h1{margin:8px 0 2px;font-size:26px;line-height:1.3}
+.scope-sub{margin:0 0 18px;font-size:14px;color:var(--muted)}
+.sc-cols{display:grid;grid-template-columns:1fr 1fr;gap:24px;margin:0 0 24px}
+.sc-panel{border:1px solid var(--line);padding:14px 18px;min-width:0;margin:0 0 24px}
+.sc-cols .sc-panel{margin:0}
+.sc-panel h2{margin:0 0 10px;font-size:16px;border-bottom:1px solid var(--line);padding-bottom:8px}
+.sc-row{display:flex;gap:16px;padding:8px 0;border-bottom:1px solid var(--line);font-size:14px}
+.sc-row:last-of-type{border-bottom:0}
+.sc-k{flex:0 0 132px;color:var(--muted)}
+.sc-v{flex:1;min-width:0;word-break:break-all}
+.sc-v .d{display:block;color:var(--muted);font-size:13px}
+.sc-big{font-size:18px;margin:0 0 10px}
+.sc-note{margin:10px 0 0;font-size:13px;color:var(--muted)}
+.sc-list{margin:0;padding-left:18px;font-size:13px;word-break:break-all}
+.sc-legend{display:grid;grid-template-columns:repeat(3,1fr);gap:24px}
+.sc-legend h3{margin:0 0 8px;font-size:14px}
+.sc-legend ul{margin:0;padding:0;list-style:none;display:grid;gap:10px;font-size:14px}
+.sc-legend .g{display:inline-block;width:22px;text-align:center}
+.sc-legend .d{display:block;color:var(--muted);font-size:13px;margin-left:22px}
+.sc-foot{display:flex;align-items:center;gap:16px;border-top:1px solid var(--line);padding:14px 0 0;font-size:14px}
+.sc-foot .spacer{flex:1}
+.sc-foot button{min-height:36px;padding:4px 12px;font-size:13px}
+@media (max-width:900px){.sc-cols,.sc-legend{grid-template-columns:1fr}}
+/* Task 10: 移动端响应式(≤800px 单栏,基准 390×844;DESIGN §5 移动基准,图 22–24) */
+@media (max-width:800px){
+  :root{--nav-h:104px;--bar-h:56px}
+  /* 顶栏两行:品牌/状态/减少动态 + 全宽主导航(图22) */
+  #app-nav{flex-wrap:wrap}
+  #app-nav .brand{flex:1;min-width:0;height:56px;padding:0 14px;font-size:16px;border-right:0}
+  #connBadge{height:56px;padding:0 10px;font-size:12px}
+  #motionToggleBtn{height:56px;padding:0 10px;font-size:12px}
+  #app-nav nav{order:5;flex:0 0 100%;border-top:1px solid var(--line);overflow-x:auto}
+  #app-nav nav button{flex:1 0 auto;min-width:88px;min-height:47px;padding:0 10px;font-size:14px}
+  #offlineBanner{padding:4px 16px}
+  /* 待应用栏:只保留当前任务相关动作(计数+查看清单),应用入口在清单层内(图22/23) */
+  #pendingBar{gap:12px;padding:0 16px;padding-bottom:env(safe-area-inset-bottom)}
+  #pendingChips{display:none}
+  #pendingSummary{flex-shrink:1;font-size:12px}
+  #applyButton{display:none}
+  /* 技能树:工具栏横向滚动并收起次要信息;图例与缩放分上下两行,44px 触控目标 */
+  .tree-toolbar{gap:8px;padding:0 12px;overflow-x:auto}
+  .tree-toolbar .crumb,.tree-toolbar>.count,.tree-toolbar button.linklike{display:none}
+  .tree-toolbar input[type=search]{flex:1;min-width:140px;width:auto;height:44px}
+  .tree-toolbar select{height:44px}
+  .tree-toolbar button,.tree-zoom button{min-height:44px;min-width:44px}
+  .tree-legend{left:8px;right:8px;bottom:64px;gap:10px;font-size:12px;flex-wrap:wrap}
+  .tree-zoom{left:8px;right:8px;bottom:8px}
+  /* 检查栏:独立全屏层(图23 详情页形态) */
+  #inspector{position:fixed;top:var(--nav-h);left:0;right:0;bottom:env(safe-area-inset-bottom);width:auto;z-index:22;
+    border-left:0;border-top:1px solid var(--line);padding:16px}
+  /* 裁剪台:目录收为顶部可滚动区;详情由 JS 省略目录占满整宽 */
+  .cut-view{flex-direction:column}
+  .cut-catalog{width:auto;flex:0 0 auto;max-height:34%;border-right:0;border-bottom:1px solid var(--line)}
+  .cat-item{min-height:44px;padding-top:8px;padding-bottom:8px}
+  .cut-head{padding:14px 16px 10px}
+  .cut-head h1{font-size:22px}
+  .cut-toolbar{padding:0 12px;gap:8px}
+  .cut-toolbar input[type=search]{width:auto;flex:1;min-width:0;height:44px}
+  .cut-toolbar button{min-height:44px}
+  .cut-filter-pop{left:0;right:0;width:auto}
+  .cut-list{padding:12px 16px}
+  .cut-row{flex-wrap:wrap}
+  .cut-open-cell{width:100%;border-left:0;border-top:1px solid var(--line);padding:12px 14px}
+  .cut-open{flex:1;min-height:44px}
+  .cut-foot{padding:8px 16px}
+  /* 详情:页签均分,摘要单栏,操作条可折行且按钮 44px */
+  .detail-head{padding:12px 16px 0}
+  .detail-head h1{font-size:22px}
+  .detail-sum{margin:12px 16px 0;grid-template-columns:1fr}
+  .detail-sum>section+section{border-left:0;border-top:1px solid var(--line)}
+  .detail-tabs [role=tab]{flex:1;min-height:44px;padding:8px 4px}
+  .detail-body{padding:14px 16px 24px}
+  .detail-body.diffs{padding:0}
+  .detail-actions{flex:0 0 auto;min-height:var(--bar-h);flex-wrap:wrap;gap:10px;padding:10px 16px}
+  .detail-actions .hint{flex:0 0 100%;margin:0}
+  .detail-actions button{flex:1}
+  /* 文件差异:文件下拉(图23)+ 单栏增删上下堆叠,各栏独立横滚 */
+  .diff-layout{flex-direction:column}
+  .diff-files-m{flex:0 0 auto;display:grid;gap:6px;padding:10px 16px;border-bottom:1px solid var(--line)}
+  .diff-files-m label{font-size:13px;color:var(--muted)}
+  .diff-files-m select{font:inherit;height:44px;max-width:100%;border:1px solid var(--line);border-radius:0;
+    background:var(--paper);color:var(--ink)}
+  .diff-cols{display:flex;flex-direction:column}
+  .diff-pane{flex:1 1 0}
+  .diff-pane+.diff-pane{border-left:0;border-top:1px solid var(--line)}
+  .bin-cols{grid-template-columns:1fr}
+  .bin-card+.bin-card{border-left:0;border-top:1px solid var(--line)}
+  .bin-scroll{padding:14px 16px}
+  /* 清单层 / 历史 / 范围:窄屏内边距,宽表格独立横滚 */
+  .pl-scroll{padding:14px 16px 24px}
+  .pl-foot{flex-wrap:wrap;gap:10px;padding:0 16px;padding-bottom:env(safe-area-inset-bottom)}
+  .pl-foot button{flex:1}
+  .pl-sec{overflow-x:auto}
+  .hist-view{padding:14px 16px 24px}
+  .hist-job-head{flex-wrap:wrap;gap:6px 12px}
+  .hist-job-body{padding:10px 12px;overflow-x:auto}
+  .hist-job-foot{flex-wrap:wrap}
+  .hist-job-foot .info{flex:0 0 100%}
+  .hist-job-foot button{width:100%}
+  /* I-1:历史恢复勾选框 44×44 触控目标(22px 勾选 + padding 扩热区) */
+  .hist-view input[type=checkbox]{width:44px;height:44px;padding:11px;flex:0 0 auto}
+  /* 窄屏触控目标补齐:检查栏关闭 / 提示关闭 / 范围页按钮 */
+  #inspector .ins-close{min-height:44px;min-width:44px}
+  #toastClose{min-height:44px;min-width:44px}
+  .sc-foot button{min-height:44px}
+  .scope-view{padding:14px 16px 24px}
+  .sc-row{flex-wrap:wrap;gap:4px 12px}
+  .sc-k{flex-basis:100px}
+}
+/* 设计初稿 01–04：清晰的圆层级、纸面留白与连续审阅网格。 */
+.tnode text{font-size:18px}.tnode text.sub{font-size:15px}
+.tnode.grp text{font-size:18px;font-weight:600}.tnode.grp text.sub{font-size:14px;font-weight:400}
+.tnode.more text{font-size:14px}.tnode rect.hot{pointer-events:all}
+.t-trunk{stroke-width:5}.t-conn{stroke-width:2}.t-rootlet{stroke-width:1.5}
+.tree-toolbar .crumb{font-size:18px;font-weight:600}
+#app-nav .brand{font-size:22px;font-weight:700;letter-spacing:.02em}
+#app-nav nav button{font-size:18px;font-weight:600}
+.cut-head{padding:24px}.cut-head h1{font-size:28px}
+.cut-head .adv-counts{font-size:16px;margin-top:12px}
+.cut-list{grid-auto-rows:max-content}.cut-row{min-height:212px}.cut-ico{padding:20px 12px 20px 20px}
+.cut-facts{font-size:14px}.cut-name{font-size:20px}
+.cut-info{padding:20px 14px}.cut-open-cell{padding:0 16px}
+.pl-success{padding:16px 0 24px;border-bottom:1px solid var(--line);margin-bottom:20px}
+.pl-success h2{font-size:28px;margin:0 0 8px}.pl-success p{margin:0;color:var(--muted)}
+.result-branch{width:180px;height:90px;float:right;fill:none;stroke:var(--ink);stroke-width:1.6}
+.result-branch .cut-leaf{transform-origin:140px 32px;animation:resultCut .78s var(--ease) forwards}
+@keyframes resultCut{to{transform:translate(12px,35px) rotate(18deg);opacity:.25}}
+.result-branch .new-leaf{animation:regenPop .4s var(--ease)}
+.tree-empty{position:absolute;inset:0 0 100px;display:grid;place-content:center;justify-items:center;gap:12px;background:var(--paper)}
+.tree-empty h2,.tree-empty p{margin:0}.tree-empty p{color:var(--muted)}
+@media(min-width:1200px){#app-nav nav{flex:1}#app-nav nav button{flex:1}.cut-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:800px){
+  #app-nav .brand{font-size:18px}#app-nav nav button{font-size:14px}
+  .tree-toolbar .crumb{font-size:15px}.cut-row{min-height:0}
+  .cut-head{padding:16px}.cut-head h1{font-size:24px}
+  .tree-legend{gap:8px;font-size:12px}.tree-legend svg{margin-right:2px}
+  .tree-toolbar{height:auto;flex:0 0 auto;min-height:104px;flex-wrap:wrap;padding:6px 12px;overflow:visible}
+  .tree-toolbar .spacer{display:none}.tree-toolbar input[type=search]{min-width:120px}
+  .tree-toolbar select[aria-label="用途分枝"]{width:128px}
+  .cut-main[data-tab="diffs"] .detail-sum,.cut-main[data-tab="evidence"] .detail-sum,
+  .cut-main[data-tab="diffs"] .detail-paths{display:none}
+  .cut-main[data-tab] .detail-head{padding:12px 16px 0}
+}
+</style>
+<header id="app-nav">
+  <div class="brand">PRUNE / 剪刀</div>
+  <nav aria-label="主导航">
+    <button id="navTree" aria-pressed="true">技能树</button>
+    <button id="navCut" aria-pressed="false">裁剪台</button>
+    <button id="navHistory" aria-pressed="false">历史与恢复</button>
+    <button id="navScope" aria-pressed="false">方案范围</button>
+  </nav>
+  <button id="motionToggleBtn" aria-pressed="false" title="控制分枝展开、修剪和恢复的动画；关闭后仍显示完整操作结果">修剪动效：开启</button>
+  <div id="connBadge" role="status">连接中…</div>
+</header>
+<div id="offlineBanner" role="status"></div>
+<main id="view"></main>
+<footer id="pendingBar">
+  <strong id="pendingSummary">待应用 0 项</strong>
+  <span id="pendingChips"></span>
+  <span class="spacer"></span>
+  <button id="pendingOpenBtn" disabled>查看清单</button>
+  <button id="applyButton" class="primary" disabled>应用所选 0</button>
+</footer>
+<div id="toast" role="status" aria-live="polite" hidden><span id="toastMsg"></span><button id="toastClose" aria-label="关闭提示" hidden>×</button></div>
+<div id="pendingLayer" role="dialog" aria-modal="true" aria-label="待应用清单"></div>
+<div id="loading"><div class="wordmark">PRUNE</div><p id="loadingMessage">正在读取本地方案…</p></div>
+<script>
+'use strict';
+const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+function h(tag,attrs,...kids){const n=document.createElement(tag);
+  for(const[k,v]of Object.entries(attrs||{})){
+    if(v==null)continue;
+    if(k==='class')n.className=v;else if(k==='dataset')Object.assign(n.dataset,v);
+    else if(k.startsWith('on'))n.addEventListener(k.slice(2),v);
+    else if(k==='style')n.style.cssText=v;else if(v===false)continue;
+    else if(v===true)n.setAttribute(k,'');else n.setAttribute(k,v)}
+  for(const c of kids.flat(9)){if(c==null)continue;n.append(c.nodeType?c:document.createTextNode(c))}
+  return n}
+const reducedMedia=matchMedia('(prefers-reduced-motion: reduce)');
+const mqMobile=matchMedia('(max-width:800px)'); // Task 10:移动断点;树折叠/详情布局随断点切换重建
+const isMobile=()=>mqMobile.matches;
+const S={token:'',data:null,details:{},selected:null,route:'tree',cutView:'overview',
+  detailTab:'advice',detailFile:0,detailFiles:{},branchFocus:null,folds:new Set(),
+  filters:{text:'',source:'all',advice:'all',decision:'all',execution:'all'},
+  historyPick:new Set(),histToggle:new Set(),histArchive:new Set(),online:false,requesting:false,expandedGroups:new Set(),cutCollapsed:new Set(),
+  reduced:reducedMedia.matches,
+  entered:false,pendingOpen:false,lastViewKey:'',lastJobStatuses:new Map(),returnFocusKey:null,
+  restoredFlash:new Map(),justDecided:'',justDecidedAt:0,prevPendingCount:-1,
+  prevExec:new Map(),execPrimed:false,animPlayed:new Map(),
+  applyJobId:null,jobRowStates:new Map(),lastSync:0,enteredView:false,scopeReturn:'tree'};
+// 令牌:hash → sessionStorage → 地址栏抹除(契约)
+S.token=sessionStorage.getItem('prune-token')||'';
+if(location.hash.length>1){S.token=location.hash.slice(1);sessionStorage.setItem('prune-token',S.token);
+  history.replaceState(null,'',location.pathname)}
+if(localStorage.getItem('prune-motion')==='reduced')S.reduced=true;
+if(localStorage.getItem('prune-motion')==='full')S.reduced=false;
+S.route=localStorage.getItem('prune-view')==='cut'?'cut':'tree';
+async function api(path,body){const r=await fetch('/api/'+path,body==null?{headers:{Authorization:'Bearer '+S.token}}:
+  {method:'POST',headers:{Authorization:'Bearer '+S.token,'Content-Type':'application/json'},body:JSON.stringify(body)});
+  if(!r.ok){let msg='请求失败 '+r.status;try{msg=(await r.json()).error||msg}catch{}const e=new Error(msg);e.status=r.status;throw e}
+  return r.status===202?r.json():r.json()}
+// 派生谓词与命名(CONTRACT L39 四分类)
+function adviceKey(i){if(i.reviewStatus==='pending'||i.action==='unreviewed')return 'pending';return i.recommendation||({keep:'keep',modify:'modify',merge:'modify',split:'modify',
+  disable:'disable',review:'undetermined',unreviewed:'undetermined'}[i.action])||'undetermined'}
+const adviceName=i=>i.kind==='plugin'&&i.pluginControl&&typeof i.pluginControl.desiredEnabled==='boolean'
+  ?(i.pluginControl.desiredEnabled?'启用':'停用'):({keep:'保留',modify:'修改',disable:'停用',pending:'待审读',undetermined:'无法判定'})[adviceKey(i)];
+const sourceName=i=>i.kind==='instruction'?(i.scope==='project'?'项目规则':'全局规则'):({user:'用户独立',project:'项目技能',plugin:'完整插件',platform:'平台固定',system:'平台固定',unknown:'来源未知'})[i.scope]||'来源未知';
+const decisionName=i=>({approved:'已采纳',deferred:'暂不采纳'})[S.data.selection[i.id]]||'未决定';
+const canAdopt=i=>i.decisionAllowed&&!['pending','undetermined'].includes(adviceKey(i))&&i.state==='ready';
+const executable=i=>i.executable??(i.executionMode==='workbench');
+const unresolved=i=>S.data.selection[i.id]==='approved'&&!executable(i)&&adviceKey(i)!=='keep'&&['instruction','plugin'].includes(i.kind);
+function effectiveText(i){const e=i.effectiveState;if(!e)return executable(i)?'当前实际状态尚未核验':'';
+  const status={verified:'已核验',drifted:'与执行记录不一致',unknown:'暂无法核验','not-applied':'尚未应用'}[e.status]||'暂无法核验';
+  return status+(e.detail?' · '+e.detail:'')+(i.kind==='plugin'&&!/会话.*加载/.test(e.detail||'')?' · 当前会话加载状态未确认':'')}
+function pluginInventory(i){const live=i.effectiveState?.hostState,s=live||i.pluginControl?.before;
+  if(!s)return `安装信息:${i.plugin?.inventoryStatus||'未同步'}`;
+  const installed=s.installed===true?'已安装':s.installed===false?'未安装':'安装状态未知';
+  const configured={enabled:'已启用',disabled:'已停用'}[s.configured]||'启停配置未知';
+  return `${live?'最近宿主核验':'冻结快照'}：${installed} · 版本 ${s.version||'未确认'} · ${configured}`}
+function pluginTarget(i){const frozen=i.pluginControl,c=frozen?.control||i.plugin?.control;if(!c)return '';
+  const desired=frozen?.desiredEnabled??c.desiredEnabled;
+  const project=c.projectRoot||c.cwd,version=frozen?.before?.version||i.plugin?.version||'未确认';
+  return `${c.host} · ${c.pluginId||c.id} · 冻结版本 ${version} · 作用域 ${c.scope}${project?' · 项目 '+project:''} · 目标${desired===true?'启用':desired===false?'停用':'待确认'}`}
+function planNotice(){
+  const completion=S.data.plan.completion;
+  const progress=completion?.status==='partial'?` · 尚有 ${completion.pendingReview} 项待完成评审、${completion.missingCandidates} 项待准备候选。`:'';
+  const count=S.data.items.filter(executable).length;
+  return h('p',{class:'plan-notice'},h('strong',null,S.data.plan.title||'当前方案'),
+    progress,' · ',count?`${count} 项可执行。采纳后点击“应用所选”才写入文件或切换插件状态，可在历史中恢复。`
+      :'当前方案没有可执行变更；采纳只记录决定。需要实际修剪时，须先准备含执行候选的新方案。')}
+const available=i=>executable(i)&&S.data.selection[i.id]==='approved'&&i.executionState==='ready';
+function executionModeLabel(i){
+  if(i.reviewStatus==='pending'||i.action==='unreviewed')return '待完成审读';
+  if(i.reviewStatus==='needs-info')return '待补充依据';
+  if(i.executionMode==='unavailable')return i.kind==='instruction'
+    ?(i.revisionDraft?'规则修订稿待落实':'规则建议待落实'):(i.blocked?'候选准备受阻':'待准备候选');
+  if(i.executionMode==='host'&&executable(i))return '正式插件接口';
+  return {workbench:'工作台执行',host:'宿主管理',none:'不涉及变更'}[i.executionMode]||'待核实'}
+function executionLabel(i){const m=executionModeLabel(i);
+  const s={ready:'未应用',applied:'已应用',running:'执行中',problem:'需处理'}[i.executionState];
+  return s?m+' · '+s:m}
+function executionExplanation(i){return i.executionNote||i.nextStep||
+  (adviceKey(i)==='pending'?'尚未完成内容审读。请由原宿主 Agent 继续核查原文后准备新方案。':
+   adviceKey(i)==='undetermined'?'证据尚不足。请按评审理由补充所缺资料，再由原宿主 Agent 继续评审。':
+   i.kind==='plugin'?(executable(i)?'应用将通过正式插件接口切换冻结目标的启停状态；配置读回不代表当前会话已重新加载。':'此方案仅保存插件建议，尚未冻结可执行的宿主、插件标识与作用域。需准备新方案后重新选择。'):
+   i.kind==='instruction'?(executable(i)?'应用将写入已审阅的规则修订稿，并保留原文件供恢复；写入与恢复前会检查后续修改。':'此方案的规则稿仅供审阅，采纳尚未写入文件。需准备包含可执行规则稿的新方案，再重新审阅与选择。'):
+   adviceKey(i)==='keep'?'建议保留原件，采纳仅记录决定，不涉及文件变更。':
+   '尚未准备完整候选。请由原宿主 Agent 生成新冻结方案，再审阅差异并选择应用。')}
+function outcomeText(i){return i.lastOutcome?`最近结果:${jobEntryName[i.lastOutcome.status]||i.lastOutcome.status}${i.lastOutcome.error?' · '+i.lastOutcome.error:''}`:''}
+let toastTimer=0,toastSticky=false;
+function hideToast(){const t=$('toast');t.hidden=true;toastSticky=false;clearTimeout(toastTimer)}
+function notice(msg,isError,sticky){const t=$('toast'),m=$('toastMsg');
+  if(t.hidden||m.textContent!==msg)m.textContent=msg; // live region:同状态不重复播报
+  t.className=isError?'error':'';t.hidden=false;toastSticky=!!sticky;
+  $('toastClose').hidden=!sticky; // M-3:常驻提示提供显式关闭
+  clearTimeout(toastTimer);if(!sticky)toastTimer=setTimeout(hideToast,isError?8500:4200)}
+function stateKey(data){return JSON.stringify([data.selection,data.items.map(i=>[i.state,i.executionState,i.executable,i.effectiveState?.status,i.effectiveState?.detail,i.effectiveState?.loaded,
+  i.effectiveState?.hostState?.installed,i.effectiveState?.hostState?.version,i.effectiveState?.hostState?.configured]),
+  data.jobs.map(j=>[j.id,j.status,j.items.map(x=>[x.status,x.error])]),data.busy])}
+async function refresh(){ // 1.1s 轮询 + 序列化脏检查;失败置 offline,成功后恢复
+  try{const fresh=await api('state');const wasOffline=!S.online;S.online=true;
+    const key=stateKey(fresh);
+    S.data=fresh;
+    for(const job of fresh.jobs){const prev=S.lastJobStatuses.get(job.id);
+      if(prev&&prev!==job.status&&job.status!=='running'){
+        notice(job.status==='completed'?(job.kind==='restore'?'恢复操作完成 · 请查看当前核验状态':'应用操作完成 · 请查看当前核验状态')
+          :(job.error||'操作已停止,请查看历史记录'),job.status!=='completed');
+        if(job.status==='completed'&&job.kind==='restore'){ // 恢复成功:三事实字段依次稳定更新(220ms,见 cut 行 .rst-f)
+          const t=Date.now();for(const x of job.items)S.restoredFlash.set(x.id,t)}}
+      if(job.status!=='running'){ // M2:job 终态后清空同签名 requestId 缓存,同集合再次应用/恢复会生成新 requestId
+        if(pendingApply.requestId&&job.requestId===pendingApply.requestId){pendingApply.sig='';pendingApply.requestId=''}
+        if(pendingRestore.requestId&&job.requestId===pendingRestore.requestId){pendingRestore.sig='';pendingRestore.requestId=''}}
+      S.lastJobStatuses.set(job.id,job.status)}
+    if(key!==S.lastViewKey||wasOffline){S.lastViewKey=key;render()}
+    S.lastSync=Date.now();
+    if(!S.enteredView){S.enteredView=true;$('view').classList.add('first-in')} // 首次读取成功:一次淡入
+    $('loading').hidden=true;return true}
+  catch(e){const wasOnline=S.online;S.online=false;S.lastViewKey='';
+    if(S.data&&wasOnline)render();
+    if(!S.data)$('loadingMessage').textContent='无法连接本地服务:'+e.message+'。请使用原启动链接重新打开。';
+    return false}}
+// Read identity from the DOM: S can already point to the next object or tab.
+const readingState={scrolls:new Map()};
+function readingKey(el){
+  const view=el.closest('.cut-view');
+  if(el.matches('.cat-groups'))return 'catalog';
+  if(el.matches('.cut-list'))return 'overview';
+  return (view?.dataset.readingKey||'')+'/'+(el.dataset.scrollKey||el.className)}
+function saveReadingContext(root){
+  root.querySelectorAll('.cat-groups,.cut-list,.detail-body,.diff-files,.bin-scroll,.diff-pane').forEach(el=>
+    readingState.scrolls.set(readingKey(el),{top:el.scrollTop,left:el.scrollLeft}));
+  const ae=document.activeElement;
+  return ae?.id&&root.contains(ae)?{id:ae.id,start:ae.selectionStart,end:ae.selectionEnd}:null}
+function restoreReadingContext(root,focus){
+  root.querySelectorAll('.cat-groups,.cut-list,.detail-body,.diff-files,.bin-scroll,.diff-pane').forEach(el=>{
+    const pos=readingState.scrolls.get(readingKey(el));
+    if(pos){el.scrollTop=pos.top;el.scrollLeft=pos.left}});
+  const el=focus&&root.querySelector('#'+CSS.escape(focus.id));
+  if(el){el.focus({preventScroll:true});
+    if(focus.start!=null)try{el.setSelectionRange(focus.start,focus.end)}catch{}}}
+function render(){ // 主渲染:路由分发 + 全局组件,具体视图由后续任务填充
+  const v=$('view'),focus=saveReadingContext(v);
+  const route=S.route;
+  for(const[id,r]of[['navTree','tree'],['navCut','cut'],['navHistory','history'],['navScope','scope']])
+    $(id).setAttribute('aria-pressed',String(route===r));
+  const connTxt=S.online?'本机连接':'已断线 · 显示上次读取';
+  if($('connBadge').textContent!==connTxt)$('connBadge').textContent=connTxt; // live region:同状态不重复播报
+  $('connBadge').classList.toggle('off',!S.online);
+  renderOfflineBanner();
+  renderPendingBar();
+  renderPendingLayer();
+  v.replaceChildren(renderRoute(route));restoreReadingContext(v,focus)}
+function syncBannerOffset(){ // M-2:断线条带高度自适应,#view 按实际高度下移(窄屏折行后不压内容)
+  const hgt=document.body.classList.contains('offline')?$('offlineBanner').offsetHeight:0;
+  document.documentElement.style.setProperty('--banner-h',hgt+'px')}
+function renderOfflineBanner(){ // 图20:已加载后断线;保留上次数据与"上次读取于"时间语义,120ms 切换不遮挡阅读
+  const off=!S.online&&!!S.data,b=$('offlineBanner');
+  document.body.classList.toggle('offline',off);
+  b.classList.toggle('show',off);
+  if(off){const txt=`正在显示上次读取的数据 · 上次读取于 ${new Date(S.lastSync).toLocaleTimeString('zh-CN',{hour12:false})}。`
+    +'恢复连接后将核对真实状态；断线期间决定、应用与恢复均已禁用。';
+    if(b.textContent!==txt)b.textContent=txt}
+  syncBannerOffset()}
+addEventListener('resize',syncBannerOffset);
+function renderRoute(route){ // tree、cut、history、scope 全部就位
+  if(!S.data)return h('p',{class:'mono'},'正在读取本地方案…');
+  if(route==='tree')return renderTree();
+  if(route==='cut')return renderCut();
+  if(route==='history')return renderHistory();
+  return renderScope()}
+function renderPendingBar(){ // 全局待应用栏(DESIGN §2:跨视图一致)
+  if(!S.data)return;
+  const pending=S.data.items.filter(available);
+  const lock=S.data.busy||!S.online||S.requesting; // 执行中禁用决定变更与重复应用
+  const waiting=S.data.items.filter(unresolved).length;
+  const ps=$('pendingSummary');ps.textContent=`待应用 ${pending.length} 项${waiting?' · 另 '+waiting+' 项待落实':''}`;
+  if(S.prevPendingCount>=0&&S.prevPendingCount!==pending.length){ // 采纳成功:底栏数量一次变化,180ms 强调
+    ps.classList.remove('pd-flash');void ps.offsetWidth;ps.classList.add('pd-flash')}
+  S.prevPendingCount=pending.length;
+  $('pendingChips').replaceChildren(...pending.map(i=>
+    h('span',{class:'chip'},`${i.name} · ${adviceName(i)}`,
+      h('button',{style:'border:0;padding:0 4px;min-height:0','aria-label':'撤销采纳 '+i.name,
+        disabled:lock||null,onclick:()=>setChoice(i.id,'none')},'×'))));
+  $('applyButton').textContent=`应用所选 ${pending.length}`;
+  $('applyButton').disabled=!pending.length||lock;
+  $('pendingOpenBtn').disabled=!S.data.items.length}
+async function setChoice(id,decision){ // 保存决定;失败保持原状态 + 局部提示(DESIGN §4);409 指纹/版本冲突常驻展示,不提供强制入口
+  if(S.requesting||!S.online)return;S.requesting=true;
+  try{S.data=await api('selection',{planFingerprint:S.data.plan.fingerprint,decisions:{[id]:decision}});
+    S.lastViewKey=stateKey(S.data);S.justDecided=id;S.justDecidedAt=Date.now()} // 成功响应后更新状态
+  catch(e){notice(e.message,true,e.status===409)}
+  finally{S.requesting=false;render()}}
+function flashViewX(){const v=$('view');v.classList.remove('x-in');void v.offsetWidth;
+  v.classList.add('x-in');setTimeout(()=>v.classList.remove('x-in'),200)} // 120ms 交叉淡入(reduced 态由 CSS 压到 ≤80ms)
+function go(route){const from=S.route;S.route=route;S.pendingOpen=false;localStorage.setItem('prune-view',route==='cut'?'cut':'tree');
+  if(route==='tree'&&from!=='tree'&&S.selected){const it=S.data.items.find(i=>i.id===S.selected);
+    if(it&&matchFilter(it)){if(isMobile())S.expandedGroups.clear();S.expandedGroups.add(it.group);
+      S.branchFocus=it.group;treeUI.prevFocus=undefined}}
+  render();
+  if(from!==route&&((from==='tree'&&route==='cut')||(from==='cut'&&route==='tree')))flashViewX()}
+function treeToCut(id){ // 树→裁剪台 320ms:同一对象标题位置连续过渡,其余内容 120ms 交叉淡入(在 go 内)
+  S.selected=id;S.cutView='detail';S.detailTab='diffs';
+  const src=treeUI.insTitle;
+  if(S.reduced||!src||!src.isConnected){go('cut');return}
+  const r1=src.getBoundingClientRect(),fs1=parseFloat(getComputedStyle(src).fontSize)||20;
+  go('cut');
+  requestAnimationFrame(()=>{
+    const dst=document.querySelector('.detail-head h1');
+    if(!dst)return;
+    const r2=dst.getBoundingClientRect(),fs2=parseFloat(getComputedStyle(dst).fontSize)||26;
+    const fly=h('div',{class:'fly-title','aria-hidden':'true',
+      style:`left:${r1.left}px;top:${r1.top}px;font-size:${fs1}px`},src.textContent);
+    dst.style.transition='opacity .08s linear';dst.style.opacity='0';
+    document.body.append(fly);
+    requestAnimationFrame(()=>{
+      fly.style.transform=`translate(${r2.left-r1.left}px,${r2.top-r1.top}px) scale(${fs2/fs1})`;
+      fly.style.opacity='0'; // 末段 80ms 淡出,与就位标题交接
+      setTimeout(()=>{fly.remove();dst.style.opacity='';
+        setTimeout(()=>{dst.style.transition=''},120)},360)})})}
+$('navTree').onclick=()=>go('tree');$('navCut').onclick=()=>go('cut');
+$('navHistory').onclick=()=>go('history');
+$('navScope').onclick=()=>{if(S.route!=='scope')S.scopeReturn=S.route;go('scope')};
+addEventListener('keydown',e=>{if(e.key==='Escape'){
+  if(S.pendingOpen)closePendingList(); // Esc 只关只读层,不取消后台任务
+  else if(S.route==='tree'&&S.selected)closeInspector();
+  else if(S.route==='cut'&&cutUI.filterOpen){cutUI.filterOpen=false;render();
+    requestAnimationFrame(()=>{const b=$('cutFilterBtn');if(b)b.focus({preventScroll:true})})}
+  else if(S.route==='cut'&&S.cutView==='detail')backToOverview()}});
+// ---------- Task 3: 技能树 ----------
+const SVGNS='http://www.w3.org/2000/svg';
+function hs(tag,attrs,...kids){const n=document.createElementNS(SVGNS,tag);
+  for(const[k,v]of Object.entries(attrs||{})){if(v==null)continue;
+    if(k==='class')n.setAttribute('class',v);
+    else if(k.startsWith('on'))n.addEventListener(k.slice(2),v);
+    else n.setAttribute(k,v)}
+  for(const c of kids.flat(9)){if(c==null)continue;n.append(c.nodeType?c:document.createTextNode(c))}
+  return n}
+const VT={k:1,x:0,y:0}; // 树视口:translate(x,y) scale(k)
+const treeUI={key:'',wrap:null,stage:null,inner:null,inspector:null,pctEl:null,matchEl:null,resetBtn:null,
+  nodes:new Map(),leafPos:new Map(),groupBBox:new Map(),bbox:null,prevFocus:undefined,fitted:false};
+let vtAnim=0,dragState=null,suppressClick=false;
+function applyView(){if(treeUI.inner)treeUI.inner.setAttribute('transform',
+  `translate(${VT.x} ${VT.y}) scale(${VT.k})`);
+  if(treeUI.pctEl)treeUI.pctEl.textContent=Math.round(VT.k*100)+'%'}
+function cubicBezier(p1x,p1y,p2x,p2y){ // 数值近似 CSS cubic-bezier(牛顿迭代解 x(t))
+  const cx=3*p1x,bx=3*(p2x-p1x)-cx,ax=1-cx-bx,cy=3*p1y,by=3*(p2y-p1y)-cy,ay=1-cy-by;
+  const sx=t=>((ax*t+bx)*t+cx)*t,sy=t=>((ay*t+by)*t+cy)*t;
+  return x=>{let t=x;for(let i=0;i<5;i++){const s=sx(t)-x;if(Math.abs(s)<1e-4)break;
+    const d=(3*ax*t+2*bx)*t+cx;if(Math.abs(d)<1e-4)break;t-=s/d}return sy(t)}}
+const EASE=cubicBezier(.22,1,.36,1); // 与 var(--ease) 同一条曲线
+function decFlashCls(id){ // 采纳成功后 180ms 状态强调,仅对刚变化的对象播一次
+  if(S.justDecided!==id)return null;
+  if(Date.now()-S.justDecidedAt>900){S.justDecided='';return null}
+  return 'pd-flash'}
+function applyMotionPref(){document.body.classList.toggle('reduced',S.reduced);
+  const b=$('motionToggleBtn');if(b){b.setAttribute('aria-pressed',String(!S.reduced));
+    b.textContent='修剪动效：'+(S.reduced?'关闭':'开启')}}
+function motionToggle(){ // 全局"减少动态"开关(导航栏),即时生效并持久化
+  S.reduced=!S.reduced;localStorage.setItem('prune-motion',S.reduced?'reduced':'full');
+  applyMotionPref()}
+function animTo(t,dur){cancelAnimationFrame(vtAnim);
+  if(S.reduced||!dur){Object.assign(VT,t);applyView();return}
+  const f={...VT},t0=performance.now();
+  const step=now=>{const p=Math.min(1,(now-t0)/dur),e=EASE(p);
+    VT.k=f.k+(t.k-f.k)*e;VT.x=f.x+(t.x-f.x)*e;VT.y=f.y+(t.y-f.y)*e;applyView();
+    if(p<1)vtAnim=requestAnimationFrame(step)};
+  vtAnim=requestAnimationFrame(step)}
+function fitBox(b,dur){const st=treeUI.stage;if(!st||!b)return;
+  const w=st.clientWidth||800,h=st.clientHeight||500;
+  animTo(fitTransform(b,w,h,isMobile()?132:80),dur)}
+function fitTransform(b,w,h,bottom=80){
+  const roomW=Math.max(1,w-32),roomH=Math.max(1,h-bottom-20);
+  const k=Math.min(roomW/Math.max(1,b.maxX-b.minX),roomH/Math.max(1,b.maxY-b.minY),1.25);
+  return{k,x:w/2-k*(b.minX+b.maxX)/2,y:20+roomH/2-k*(b.minY+b.maxY)/2}}
+function zoomAt(f,cx,cy){const k=Math.min(Math.max(VT.k*f,0.15),3),r=k/VT.k;
+  VT.x=cx-(cx-VT.x)*r;VT.y=cy-(cy-VT.y)*r;VT.k=k;applyView()}
+// 分组左右交替；大集合显示分组摘要，其余预览 1–3 个原名节点，点击分组展开。
+// 叶间距 88；分组两行标题、完整热区与标签纳入范围；窄屏只展开一个用途分枝。
+const textW=s=>[...String(s??'')].reduce((w,c)=>w+(c.codePointAt(0)>255?18:9.8),0);
+const ruleContext=i=>i.kind==='instruction'?String(i.sources?.[0]||'').replaceAll('\\','/').split('/').filter(Boolean).slice(-3,-1).join('/'):'';
+const treeSub=i=>ruleContext(i)||adviceName(i)+(i.kind==='plugin'?'(插件)':'');
+const treeName=i=>i.name.length>26?i.name.slice(0,25)+'…':i.name;
+function groupLines(name){
+  const lines=[''];for(const c of name){
+    if(textW(lines.at(-1)+c)>126){if(lines.length===2){lines[1]=lines[1].slice(0,-1)+'…';break}lines.push('')}
+    lines[lines.length-1]+=c}return lines}
+function treeGeom(items){
+  const groups=[],byGroup=new Map();
+  for(const i of items){if(!byGroup.has(i.group)){byGroup.set(i.group,[]);groups.push(i.group)}
+    byGroup.get(i.group).push(i)}
+  const mob=isMobile(),compact=groups.length>8&&!mob&&!S.branchFocus&&!S.expandedGroups.size&&!activeFilterCount();
+  const gapX=compact?95:150,leafDX=mob?115:165,leafDY=88,sideGap=compact?22:40;
+  const preview=groups.length>8?0:groups.length>4?1:groups.length>2?2:3;
+  const meta=groups.map((g,k)=>{
+    const list=byGroup.get(g);
+    const matching=list.filter(matchFilter),searching=activeFilterCount()>0;
+    const shown=searching?matching:mob?(S.expandedGroups.has(g)?list:[])
+      :S.expandedGroups.has(g)?list:list.slice(0,preview);
+    const hidden=list.length-shown.length,n=shown.length+(hidden>0?1:0);
+    return{g,side:mob?1:k%2===0?-1:1,list,shown,hidden,n,halfH:compact?22:Math.max(60,(n-1)/2*leafDY)}});
+  for(const side of[-1,1]){const col=meta.filter(m=>m.side===side);if(!col.length)continue;
+    const total=col.reduce((a,m)=>a+m.halfH*2,0)+sideGap*(col.length-1);
+    let y=-total/2;for(const m of col){m.gy=y+m.halfH;y+=m.halfH*2+sideGap}}
+  const top=(meta.length?Math.min(...meta.map(m=>m.gy)):0),
+    base=(meta.length?Math.max(...meta.map(m=>m.gy+m.halfH)):0)+(compact?28:60);
+  const groupPos=new Map(),leafPos=new Map(),morePos=new Map(),plan=new Map();
+  const b={minX:1e9,maxX:-1e9,minY:1e9,maxY:-1e9};
+  const grow=(x,y)=>{b.minX=Math.min(b.minX,x);b.maxX=Math.max(b.maxX,x);
+    b.minY=Math.min(b.minY,y);b.maxY=Math.max(b.maxY,y)};
+  for(const m of meta){
+    const gx=m.side*gapX,gy=m.gy;
+    groupPos.set(m.g,{x:gx,y:gy,side:m.side});
+    plan.set(m.g,{shown:m.shown,hidden:m.hidden});
+    if(compact){grow(gx-32,gy-32);grow(gx+32,gy+32);grow(gx+m.side*210,gy)}
+    else{grow(gx-72,gy-56);grow(gx+72,gy+96)} // 两行组名与节点热区均纳入适配范围
+    m.shown.forEach((it,idx)=>{const lx=gx+m.side*leafDX,ly=gy+(idx-(m.n-1)/2)*leafDY;
+      leafPos.set(it.id,{x:lx,y:ly,side:m.side,grp:m.g});
+      const sub=treeSub(it);
+      const lw=48+Math.max(textW(treeName(it)),textW(sub));
+      grow(lx+m.side*lw,ly-36);grow(lx+m.side*lw,ly+36);grow(lx-m.side*36,ly)});
+    if(m.hidden>0&&!compact){const my=gy+(m.shown.length-(m.n-1)/2)*leafDY;
+      morePos.set(m.g,{x:gx+m.side*leafDX,y:my,side:m.side,hidden:m.hidden});
+      grow(gx+m.side*leafDX+m.side*44,my)}
+    grow(gx,gy)}
+  grow(0,top);grow(0,base+88);grow(-60,base+60);grow(60,base+60);
+  return{groups,byGroup,groupPos,leafPos,morePos,plan,top,base,compact,bbox:b}}
+function advIconKids(key){ // 建议类型线条图标(44 视域,stroke 由容器继承;与裁剪台 miniIcon 同款画法)
+  const doc=[hs('path',{d:'M13 8 H25 L31 14 V36 H13 Z'}),hs('path',{d:'M25 8 V14 H31'})];
+  switch(key){
+    case 'pending':case 'undetermined':return[...doc,hs('text',{x:22,y:30,'text-anchor':'middle'},'?')];
+    case 'disable':return[hs('path',{d:'M9 17 H35 V33 H9 Z'}),hs('path',{d:'M9 17 L14 10 H30 L35 17'}),
+      hs('path',{d:'M18 24 H26'})]; // 归档盒
+    case 'modify':return[hs('path',{d:'M13 28 L27 12 L33 18 L19 34 L11 35 Z'}),
+      hs('path',{d:'M24 15 L30 21'})]; // 铅笔
+    default:return[...doc,hs('path',{d:'M17 25 L21 29 L28 20'})]}} // 保留:文档+对勾
+function leafIcon(i,cx,cy){ // 叶节点圆内嵌图标:插件=立方体,其余按建议类型(不靠灰度区分)
+  const kids=i.kind==='plugin'
+    ?[hs('path',{d:'M10 16 L22 9 L34 16 V29 L22 36 L10 29 Z'}),hs('path',{d:'M10 16 L22 23 L34 16 M22 23 V36'})]
+    :advIconKids(adviceKey(i));
+  return hs('svg',{class:'ico',x:cx-15,y:cy-15,width:30,height:30,viewBox:'0 0 44 44','aria-hidden':'true'},kids)}
+function execTransitions(items){ // 轮询检测到 executionState 迁移时标记一次性动效;首轮只建基线不播
+  const out=new Map();
+  if(S.execPrimed&&!S.reduced)for(const i of items){const p=S.prevExec.get(i.id);
+    if(p&&p!==i.executionState){
+      const t=i.executionState==='applied'?'applied':(p==='applied'&&i.executionState==='ready'?'restored':null);
+      if(t&&S.animPlayed.get(i.id)!==t){S.animPlayed.set(i.id,t);out.set(i.id,t)}}}
+  S.prevExec=new Map(items.map(i=>[i.id,i.executionState]));S.execPrimed=true;
+  return out}
+function matchFilter(i){const f=S.filters;
+  if(f.source!=='all'&&i.scope!==f.source)return false;
+  if(f.advice!=='all'&&adviceKey(i)!==f.advice)return false;
+  if(f.decision!=='all'&&(S.data.selection[i.id]||'none')!==f.decision)return false;
+  if(f.execution!=='all'&&i.executionMode!==f.execution)return false;
+  if(f.text){const q=f.text.toLowerCase();
+    if(![i.name,i.group,i.rationale,(i.tags||[]).join(' ')].join(' ').toLowerCase().includes(q))return false}
+  return true}
+function applyFilters(){ // 过滤只改明暗,不删节点;不重排相机
+  if(!S.data)return;let n=0;
+  for(const i of S.data.items){const ok=matchFilter(i),g=treeUI.nodes.get(i.id);
+    if(g){g.classList.toggle('dim',!ok);g.classList.toggle('hit',ok&&!!S.filters.text)}
+    if(ok)n++}
+  const active=!!(S.filters.text||S.filters.source!=='all'||S.filters.advice!=='all'
+    ||S.filters.decision!=='all'||S.filters.execution!=='all');
+  if(treeUI.matchEl)treeUI.matchEl.textContent=active?`匹配 ${n} 项`:'';
+  if(treeUI.resetBtn)treeUI.resetBtn.hidden=!active}
+function syncSel(){ // 选中环 + 其他分枝降次级对比(DESIGN §6 180ms)
+  const sel=S.selected,sp=sel?treeUI.leafPos.get(sel):null;
+  treeUI.nodes.forEach((g,id)=>g.classList.toggle('sel',id===sel));
+  if(treeUI.inner)for(const el of treeUI.inner.querySelectorAll('[data-grp]'))
+    el.classList.toggle('soft',!!(sp&&el.dataset.grp!==sp.grp))}
+function nodeActivate(id){ // 点击/Enter/Space:只设选中并开检查栏,不跳路由
+  if(suppressClick)return;
+  S.selected=id;S.returnFocusKey='tree-node-'+id;syncSel();openInspector(id)}
+function openInspector(id){ // 320px 右侧检查栏(对齐设计初稿 02:建议/来源 pill、三行事实、保留/调整/原文依据小节、直出决定按钮)
+  const i=S.data.items.find(x=>x.id===id);if(!i||!treeUI.inspector)return;
+  S.selected=id;syncSel();
+  const ins=treeUI.inspector,titleEl=h('h2',null,i.name),decCls=decFlashCls(id);
+  treeUI.insTitle=titleEl; // 树→裁剪台 320ms 标题连续过渡的起始元素
+  const dec=S.data.selection[i.id],lock=S.data.busy||!S.online||S.requesting||i.state!=='ready';
+  const insSec=(icon,title,text)=>h('section',{class:'ins-sec'},
+    hs('svg',{width:18,height:18,viewBox:'0 0 16 16','aria-hidden':'true'},hs('path',{d:icon})),
+    h('div',null,h('h3',null,title),h('p',null,text)));
+  const secs=[];
+  if((i.preserves||[]).length)
+    secs.push(insSec('M3.5 1.8 H9 L12.4 5.2 V14.2 H3.5 Z M9 1.8 V5.2 H12.4 M5.8 9.6 L7.6 11.4 L10.8 7.8',
+      '保留',i.preserves[0]));
+  if(i.rationale)
+    secs.push(insSec('M2.4 5 H13.6 M2.4 11 H13.6 M9.6 3.4 V6.6 M6 9.4 V12.6',
+      adviceKey(i)==='disable'?'建议原因':'调整',i.rationale));
+  const ev=(i.evidence||[])[0];
+  if(ev)secs.push(insSec('M4 1.8 H12 V14.2 L8 11.2 L4 14.2 Z',
+    '原文依据',`${ev.path}${ev.line?':'+ev.line:''}`));
+  ins.replaceChildren(
+    h('button',{class:'ins-close',id:'insClose','aria-label':'关闭检查栏',onclick:()=>closeInspector()},'×'),
+    titleEl,
+    h('div',{class:'ins-pills'},h('span',{class:'chip'},adviceName(i)),
+      h('span',{class:'chip'},sourceName(i))),
+    h('div',{class:'ins-rows'},
+      h('div',{class:'ins-row'},h('span',null,'决策状态'),h('span',{class:decCls},decisionName(i))),
+      h('div',{class:'ins-row'},h('span',null,'执行状态'),
+        h('span',null,executable(i)?(execStateName[i.executionState]||'未应用'):'—')),
+      h('div',{class:'ins-row'},h('span',null,'执行方式'),
+        h('span',null,executionModeLabel(i)))),
+    ...(outcomeText(i)?[h('p',{class:'ins-outcome'},outcomeText(i))]:[]),
+    effectiveText(i)?h('p',{class:'ins-outcome'},effectiveText(i)):null,
+    h('p',{class:'ins-outcome'},executionExplanation(i)),
+    ...secs,
+    h('button',{class:'ins-diff',onclick:()=>treeToCut(i.id)},'在裁剪台查看完整差异 →'),
+    h('div',{class:'ins-actions'},
+      h('button',{id:'insDefer',disabled:lock||dec==='deferred',onclick:()=>setChoice(i.id,'deferred')},'暂不采纳'),
+      dec==='approved'
+        ?h('button',{id:'insAdopt',class:'primary',disabled:lock,onclick:()=>setChoice(i.id,'none')},'撤销采纳')
+        :h('button',{id:'insAdopt',class:'primary',disabled:lock||!canAdopt(i),
+          onclick:()=>setChoice(i.id,'approved')},'采纳建议')));
+  ins.inert=false;ins.classList.add('open');
+  const p=treeUI.leafPos.get(id),st=treeUI.stage; // 让出检查栏空间,选中不跳出可视区;窄屏为全屏层,无需让位
+  if(p&&st&&!isMobile()){const sx=VT.x+VT.k*p.x,lim=st.clientWidth-320-48;
+    if(sx>lim)animTo({k:VT.k,x:VT.x-(sx-lim),y:VT.y},280)}}
+function closeInspector(){S.selected=null;
+  if(treeUI.inspector){treeUI.inspector.classList.remove('open');treeUI.inspector.inert=true}
+  syncSel();
+  const t=S.returnFocusKey&&document.getElementById(S.returnFocusKey);
+  if(t)t.focus({preventScroll:true})}
+function focusBranch(g){S.branchFocus=g;render()}
+function renderTree(){
+  const items=S.data.items;
+  if(isMobile()&&!S.expandedGroups.size&&items.length){ // 窄屏默认只展开一个分组(图22):选中项所在组优先,否则首个
+    const sel=items.find(i=>i.id===S.selected);
+    S.expandedGroups.add(sel?sel.group:items[0].group)}
+  const key=JSON.stringify([items.map(i=>[i.id,i.name,i.group,i.recommendation,i.executionState,i.scope,i.kind,
+      i.summary,S.data.selection[i.id],i.effectiveState?.status,i.effectiveState?.detail,i.effectiveState?.loaded,
+      i.effectiveState?.hostState?.installed,i.effectiveState?.hostState?.version,i.effectiveState?.hostState?.configured]),
+    S.filters,S.branchFocus,[...S.expandedGroups].sort(),isMobile(),S.online,S.requesting,S.data.busy]);
+  if(treeUI.wrap&&key===treeUI.key){ // 轮询同数据:整体复用,不重播动画;但筛选文本/按钮是 applyFilters 就地改的,复用时必须重刷,否则"重置筛选"后残留旧文案
+    applyFilters();syncSel();return treeUI.wrap}
+  // 重建前记录被替换视图内带 id 元素的焦点与光标,重建后恢复(I-3)
+  const ae=document.activeElement;
+  const refocus=ae&&ae.id&&treeUI.wrap&&treeUI.wrap.contains(ae)
+    ?{id:ae.id,start:ae.selectionStart??null,end:ae.selectionEnd??null}:null;
+  treeUI.key=key;treeUI.nodes=new Map();
+  const geom=treeGeom(items);
+  treeUI.leafPos=geom.leafPos;treeUI.bbox=geom.bbox;treeUI.groupBBox=new Map();
+  const{groups,byGroup,groupPos,morePos,plan,top,base}=geom;
+  const inner=hs('g',null),kids=[];
+  const trans=execTransitions(items); // 应用/恢复状态迁移的一次性动效标记(同一迁移不重复播)
+  // 树干与根系(pathLength=1 供入场描绘生长)
+  kids.push(hs('path',{class:'t-trunk t-grow',pathLength:'1',
+    d:`M 0 ${base} C -8 ${base-80} 8 ${top+140} 0 ${Math.min(top+120,base-20)}`}));
+  for(let r=-2;r<=2;r++)kids.push(hs('path',{class:'t-rootlet t-grow',pathLength:'1',
+    d:`M 0 ${base} C ${r*14} ${base+26} ${r*30} ${base+40} ${r*44} ${base+58}`}));
+  kids.push(hs('text',{class:'t-grow','text-anchor':'middle',x:0,y:base+78,fill:'var(--muted)',
+    'font-size':13},'我的能力'));
+  groups.forEach((g,gi)=>{
+    const gp=groupPos.get(g),list=byGroup.get(g),ty=Math.min(gp.y+120,base-20);
+    const gb={minX:gp.x-72,maxX:gp.x+72,minY:gp.y-56,maxY:gp.y+96};
+    const gbGrow=(x,y)=>{gb.minX=Math.min(gb.minX,x);gb.maxX=Math.max(gb.maxX,x);
+      gb.minY=Math.min(gb.minY,y);gb.maxY=Math.max(gb.maxY,y)};
+    kids.push(hs('path',{class:'t-conn t-grow',pathLength:'1','data-grp':g,
+      d:`M 0 ${ty} C 0 ${gp.y+40} ${gp.x*0.6} ${gp.y} ${gp.x} ${gp.y}`}));
+    // 组名固定在圆下方最多两行，完整名称由 title 与 aria-label 保留。
+    kids.push(hs('g',{class:'tnode grp t-grow',role:'button',tabindex:0,'data-grp':g,
+      'aria-label':`${g} 分组,${list.length} 项,聚焦此分枝`,
+      onclick:()=>{if(!suppressClick){if(isMobile())S.expandedGroups.clear();S.expandedGroups.add(g);focusBranch(g)}},
+      onkeydown:e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();if(isMobile())S.expandedGroups.clear();S.expandedGroups.add(g);focusBranch(g)}}},
+      hs('circle',{class:'ring',cx:gp.x,cy:gp.y,r:geom.compact?26:52}),
+      hs('circle',{class:'body',cx:gp.x,cy:gp.y,r:geom.compact?22:52,style:'stroke-width:2.5'}),
+      hs('title',null,g),
+      groupLines(g).map((line,n)=>hs('text',{x:gp.x+(geom.compact?gp.side*40:0),
+        y:gp.y+(geom.compact?-4+n*24:72+n*20),'text-anchor':geom.compact?(gp.side>0?'start':'end'):'middle',
+        style:geom.compact?'font-size:20px':null},line)),
+      hs('text',{class:'sub',x:gp.x,y:gp.y+5,'text-anchor':'middle',style:geom.compact?'font-size:18px':null},
+        geom.compact?String(list.length):`${list.length} 项`),
+      geom.compact?hs('rect',{x:gp.side>0?gp.x-32:gp.x-210,y:gp.y-32,width:242,height:64,
+        fill:'transparent','pointer-events':'all'}):hs('circle',{class:'hot',cx:gp.x,cy:gp.y,r:50})));
+    const shown=plan.get(g).shown;
+    shown.forEach((it,idx)=>{
+      const lp=geom.leafPos.get(it.id),delay=Math.min(gi*30,170);
+      const adv=adviceKey(it),dec=S.data.selection[it.id],tr=trans.get(it.id);
+      const applied=it.executionState==='applied';
+      const sub=treeSub(it);
+      const labelX=lp.x+lp.side*48,anchor=lp.side>0?'start':'end';
+      const lw=48+Math.max(textW(treeName(it)),textW(sub));
+      if(applied&&adv==='disable'){ // 停用已应用:剪刀断枝——虚线残枝常驻,叶片带半截枝飘落一次后离场
+        const dl=Math.hypot(lp.x-gp.x,lp.y-gp.y)||1,ux=(lp.x-gp.x)/dl,uy=(lp.y-gp.y)/dl;
+        const b1x=lp.x-ux*44,b1y=lp.y-uy*44; // 断口:叶缘(r28)外 8px 起,两段分离
+        kids.push(hs('path',{class:'t-conn t-stub','data-grp':g,
+          d:`M ${gp.x} ${gp.y} C ${gp.x+gp.side*86} ${gp.y} ${b1x-gp.side*60} ${b1y} ${b1x} ${b1y}`}));
+        if(tr==='applied')kids.push(hs('g',{class:'t-fall','data-grp':g,'aria-hidden':'true'},
+          hs('path',{class:'t-conn',d:`M ${b1x+ux*8} ${b1y+uy*8} L ${lp.x-ux*26} ${lp.y-uy*26}`}),
+          hs('circle',{class:'body',cx:lp.x,cy:lp.y,r:28,
+            fill:'var(--paper)',stroke:'var(--ink)','stroke-width':2.5}),
+          leafIcon(it,lp.x,lp.y),
+          hs('text',{x:labelX,y:lp.y-3,'text-anchor':anchor,fill:'var(--ink)','font-size':15},it.name)));
+        const stub=hs('g',{class:'tnode pruned',role:'button',tabindex:0,
+          id:'tree-node-'+it.id,'data-grp':g,'aria-label':`${it.name},已停用并应用;残枝,点击查看`,
+          onclick:()=>nodeActivate(it.id),
+          onkeydown:e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();nodeActivate(it.id)}}},
+          hs('circle',{class:'stub-mark',cx:b1x,cy:b1y,r:14}),
+          hs('path',{class:'stub-cut',d:`M ${b1x-5} ${b1y-5} L ${b1x+5} ${b1y+5} M ${b1x+5} ${b1y-5} L ${b1x-5} ${b1y+5}`}),
+          hs('text',{class:'stub-name',x:labelX,y:lp.y+4,'text-anchor':anchor},it.name),
+          hs('circle',{class:'hot',cx:b1x,cy:b1y,r:30})); // 断口可见标记(虚线小圆+剪口×)+淡名,提示可点击查看/恢复
+        treeUI.nodes.set(it.id,stub);kids.push(stub);
+        gbGrow(lp.x-36,lp.y-36);gbGrow(lp.x+36,lp.y+36);gbGrow(lp.x+lp.side*lw,lp.y);
+        return}
+      kids.push(hs('path',{
+        class:'t-conn t-grow'+(tr==='restored'&&adv==='disable'?' t-regrow':''), // 停用品恢复:twig 从断口重新描绘 300ms
+        pathLength:'1','data-grp':g,
+        d:`M ${gp.x} ${gp.y} C ${gp.x+gp.side*86} ${gp.y} ${lp.x-gp.side*86} ${lp.y} ${lp.x} ${lp.y}`}));
+      const flash=decFlashCls(it.id);
+      const cls=['tnode','leaf','adv-'+adv,'t-leaf'];
+      if(dec==='approved')cls.push('approved');
+      if(flash&&dec==='approved')cls.push('adopt-flash'); // 采纳:墨线环 + 对勾标 180ms,不飞走
+      if(applied&&adv==='modify')cls.push('applied-mod'); // 修改已应用:虚环
+      if(tr==='applied'&&applied)cls.push('regen'); // 修改应用完成:400ms 缩放回弹再生
+      if(tr==='restored')cls.push('restore-pop');
+      const node=hs('g',{class:cls.join(' '),role:'button',tabindex:0,
+        id:'tree-node-'+it.id,'data-grp':g,style:`animation-delay:${delay}ms`,
+        'aria-label':`${it.name},建议:${adviceName(it)},决定:${decisionName(it)}`,
+        onclick:()=>nodeActivate(it.id),
+        onkeydown:e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();nodeActivate(it.id)}}},
+        hs('circle',{class:'ring',cx:lp.x,cy:lp.y,r:36}),
+        hs('title',null,it.name),
+        hs('rect',{class:'hot',x:lp.side>0?lp.x-36:lp.x-lw,y:lp.y-36,width:lw+36,height:72,fill:'transparent'}),
+        hs('circle',{class:'body',cx:lp.x,cy:lp.y,r:32}),
+        leafIcon(it,lp.x,lp.y),
+        hs('text',{x:labelX,y:lp.y-3,'text-anchor':anchor},treeName(it)),
+        hs('text',{class:'sub',x:labelX,y:lp.y+16,'text-anchor':anchor},sub),
+        hs('g',{class:'badge','aria-hidden':'true'},
+          hs('circle',{cx:lp.x+20,cy:lp.y+20,r:9,fill:'var(--paper)',stroke:'var(--ink)','stroke-width':2}),
+          hs('path',{d:`M ${lp.x+15.4} ${lp.y+20.2} l 3.2 3.2 l 6.6 -7.2`,fill:'none',
+            stroke:'var(--ink)','stroke-width':2.2,'stroke-linecap':'round','stroke-linejoin':'round'})),
+        hs('circle',{class:'hot',cx:lp.x,cy:lp.y,r:36})); // 透明热区置顶,保证可点
+      treeUI.nodes.set(it.id,node);kids.push(node);
+      gbGrow(lp.x-36,lp.y-36);gbGrow(lp.x+36,lp.y+36);gbGrow(lp.x+lp.side*lw,lp.y)});
+    const mp=morePos.get(g);
+    if(mp){const delay=Math.min(gi*30,170);
+      kids.push(hs('path',{class:'t-conn t-grow',pathLength:'1','data-grp':g,
+        d:`M ${gp.x} ${gp.y} C ${gp.x+gp.side*86} ${gp.y} ${mp.x-gp.side*86} ${mp.y} ${mp.x} ${mp.y}`}));
+      kids.push(hs('g',{class:'tnode more t-leaf',role:'button',tabindex:0,'data-grp':g,
+        style:`animation-delay:${delay}ms`,'aria-label':`展开 ${g} 其余 ${mp.hidden} 项`,
+        onclick:()=>{if(suppressClick)return;if(isMobile())S.expandedGroups.clear(); // 窄屏只保留一个展开分组
+          S.expandedGroups.add(g);focusBranch(g)}, // 展开该组并 420ms 聚焦到其完整分枝
+        onkeydown:e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();
+          if(isMobile())S.expandedGroups.clear();S.expandedGroups.add(g);focusBranch(g)}}},
+        hs('circle',{class:'body',cx:mp.x,cy:mp.y,r:26}),
+        hs('text',{x:mp.x,y:mp.y+4,'text-anchor':'middle'},`+${mp.hidden} 项`),
+        hs('circle',{class:'hot',cx:mp.x,cy:mp.y,r:34})));
+      gbGrow(mp.x-34,mp.y-34);gbGrow(mp.x+34,mp.y+34)}
+    treeUI.groupBBox.set(g,gb)});
+  // 所有连线先绘制，节点与完整标签热区在上层，避免线穿圆与遮挡点击。
+  inner.append(...kids.filter(n=>n.tagName==='path'),...kids.filter(n=>n.tagName!=='path'));
+  const svg=hs('svg',{role:'tree','aria-label':'技能树'},inner);
+  treeUI.inner=inner;
+  svg.addEventListener('wheel',e=>{e.preventDefault();
+    const r=svg.getBoundingClientRect();
+    if(e.ctrlKey||e.metaKey)zoomAt(Math.exp(-e.deltaY*0.002),e.clientX-r.left,e.clientY-r.top);
+    else{VT.x-=e.deltaX;VT.y-=e.deltaY;applyView()}},{passive:false});
+  // 拖动超过 4px 阈值才 setPointerCapture:过早捕获会把 click 重定向到 svg,叶节点 onclick 收不到(B 修复)
+  svg.addEventListener('pointerdown',e=>{dragState={x:e.clientX,y:e.clientY,moved:false,pid:e.pointerId}});
+  svg.addEventListener('pointermove',e=>{if(!dragState)return;
+    const dx=e.clientX-dragState.x,dy=e.clientY-dragState.y;
+    if(!dragState.moved&&Math.hypot(dx,dy)>4){dragState.moved=true;svg.classList.add('panning');
+      try{svg.setPointerCapture(dragState.pid)}catch{}}
+    if(dragState.moved){VT.x+=dx;VT.y+=dy;dragState.x=e.clientX;dragState.y=e.clientY;applyView()}});
+  const endDrag=()=>{if(dragState&&dragState.moved){suppressClick=true;setTimeout(()=>suppressClick=false,0)}
+    dragState=null;svg.classList.remove('panning')};
+  svg.addEventListener('pointerup',endDrag);svg.addEventListener('pointercancel',endDrag);
+  // 工具栏(≤56px)
+  const scopes=[...new Set(items.map(i=>i.scope))];
+  const matchEl=h('span',{class:'count'}),resetBtn=h('button',{hidden:true,onclick:()=>{
+    resetFilters();render()}},'重置筛选');
+  treeUI.matchEl=matchEl;treeUI.resetBtn=resetBtn;
+  const skills=items.filter(i=>i.kind==='skill').length;
+  const toolbar=h('div',{class:'tree-toolbar'},
+    h('span',{class:'crumb'},S.branchFocus?`全树 / ${S.branchFocus}`:'你的技能，向上生长'),
+    isMobile()?h('select',{'aria-label':'用途分枝',onchange:e=>{S.expandedGroups.clear();
+      S.expandedGroups.add(e.target.value);focusBranch(e.target.value)}},
+      groups.map(g=>h('option',{value:g,selected:g===(S.branchFocus||[...S.expandedGroups][0])?'':null},g))):null,
+    h('input',{type:'search',id:'treeSearch',placeholder:'搜索技能或用途…','aria-label':'搜索技能或用途',
+      value:S.filters.text,
+      oninput:e=>{S.filters.text=e.target.value;treeUI.prevFocus=undefined;render()}}),
+    S.filters.text?h('button',{'aria-label':'清空搜索',onclick:()=>{S.filters.text='';render()}},'×'):null,
+    h('span',{class:'spacer'}),
+    matchEl,resetBtn,
+    h('select',{'aria-label':'来源筛选',onchange:e=>{S.filters.source=e.target.value;treeUI.prevFocus=undefined;render()}},
+      h('option',{value:'all',selected:S.filters.source==='all'?'':null},'全部来源'),
+      scopes.map(s=>h('option',{value:s,selected:S.filters.source===s?'':null},sourceName({scope:s})))),
+    h('select',{'aria-label':'建议筛选',onchange:e=>{S.filters.advice=e.target.value;treeUI.prevFocus=undefined;render()}},
+      [['all','全部建议'],['keep','保留'],['modify','修改'],['disable','停用'],['pending','待审读'],['undetermined','无法判定']]
+        .map(([v,t])=>h('option',{value:v,selected:S.filters.advice===v?'':null},t))),
+    h('span',{class:'count'},`${items.length} 对象 · ${skills} 技能 · ${items.filter(i=>i.kind==='plugin').length} 插件${items.some(i=>i.kind==='instruction')?' · '+items.filter(i=>i.kind==='instruction').length+' 规则':''}`),
+    h('button',{class:'linklike',onclick:()=>{S.scopeReturn='tree';go('scope')}},'方案范围 →'),
+    S.branchFocus?h('button',{onclick:()=>{S.branchFocus=null;S.selected=null;S.expandedGroups.clear();render()}},'返回全树'):null);
+  // 图例(图标+文字双标识,与叶节点内嵌图标同画法;无法判定为虚线圆)
+  const lg=(key,label)=>h('span',null,
+    hs('svg',{width:20,height:20,viewBox:'0 0 44 44','aria-hidden':'true'},
+      hs('circle',{cx:22,cy:22,r:19,fill:'var(--paper)',stroke:'var(--ink)','stroke-width':2.5,
+        'stroke-dasharray':key==='undetermined'?'5 4':null}),
+      advIconKids(key)),label);
+  const legend=h('div',{class:'tree-legend'},lg('keep','保留'),lg('modify','修改'),
+    lg('disable','停用'),lg('pending','待审读'),lg('undetermined','无法判定'));
+  const pctEl=h('button',{class:'pct','aria-label':'缩放到 100%',onclick:()=>{
+    const b=treeUI.bbox,st=treeUI.stage;
+    animTo({k:1,x:(st.clientWidth||800)/2-(b.minX+b.maxX)/2,y:(st.clientHeight||500)/2-(b.minY+b.maxY)/2},420)}});
+  treeUI.pctEl=pctEl;
+  const zoomCluster=h('div',{class:'tree-zoom'},
+    h('button',{'aria-label':'缩小',onclick:()=>zoomAt(1/1.25,(treeUI.stage.clientWidth||800)/2,
+      (treeUI.stage.clientHeight||500)/2)},'−'),
+    pctEl,
+    h('button',{'aria-label':'放大',onclick:()=>zoomAt(1.25,(treeUI.stage.clientWidth||800)/2,
+      (treeUI.stage.clientHeight||500)/2)},'+'),
+    h('button',{onclick:()=>fitBox(treeUI.bbox,420)},'适配'),
+    h('button',{onclick:()=>{const p=S.selected&&treeUI.leafPos.get(S.selected),st=treeUI.stage;
+      if(p)animTo({k:VT.k,x:(st.clientWidth||800)/2-VT.k*p.x,y:(st.clientHeight||500)/2-VT.k*p.y},420);
+      else fitBox(treeUI.bbox,420)}},'定位'));
+  const inspector=h('aside',{id:'inspector','aria-label':'对象检查栏'});
+  inspector.inert=true;
+  treeUI.inspector=inspector;
+  const stage=h('div',{class:'tree-stage'},svg,legend,zoomCluster,inspector);
+  if(activeFilterCount()&&!items.some(matchFilter))stage.append(h('section',{class:'tree-empty'},
+    h('h2',null,'没有符合条件的对象'),h('p',null,'调整搜索词或清除筛选。'),
+    h('button',{onclick:()=>{resetFilters();treeUI.prevFocus=undefined;render()}},'清空筛选')));
+  treeUI.stage=stage;
+  const wrap=h('div',{class:'tree-view'},planNotice(),toolbar,stage);
+  treeUI.wrap=wrap;
+  applyView(); // I-2:重建后无条件恢复用户视口与缩放读数
+  applyFilters();syncSel();
+  if(S.selected)openInspector(S.selected); // 数据重建后恢复检查栏
+  // 相机:分枝聚焦变化→420ms 平移缩放;首次→直接适配全树;并恢复搜索框焦点(I-3)
+  // 聚焦值在重建时同步捕获并记账(prevFocus),rAF 回调只消费闭包里的快照:
+  // 后台标签页冻结 rAF 时多个回调会堆积,解冻后按各自快照依次执行,最终落在最新聚焦上,prevFocus 不会落后一拍
+  // 窄屏未显式聚焦时对准当前展开的分组(图22 单分枝视图),桌面↔窄屏切换因此自动重对准
+  const focusSnap=(activeFilterCount()?items.find(matchFilter)?.group:null)||S.branchFocus||(isMobile()?[...S.expandedGroups][0]??null:null),
+    focusInit=treeUI.prevFocus===undefined,
+    focusMoved=!focusInit&&focusSnap!==treeUI.prevFocus,
+    focusBox=(focusSnap&&treeUI.groupBBox.get(focusSnap))||treeUI.bbox;
+  treeUI.prevFocus=focusSnap;
+  requestAnimationFrame(()=>{if(!wrap.isConnected)return;
+    if(refocus){const el=wrap.querySelector('#'+CSS.escape(refocus.id));
+      if(el){el.focus({preventScroll:true});if(refocus.start!=null){try{el.setSelectionRange(refocus.start,refocus.end)}catch{}}}}
+    if(focusInit){treeUI.fitted=true;fitBox(focusBox,0)}
+    else if(focusMoved)fitBox(focusBox,420)});
+  // 入场:树干与分枝 480ms,叶按分组错开 30ms,≤650ms 只播一次
+  if(!S.entered&&!S.reduced){wrap.classList.add('enter');
+    setTimeout(()=>{wrap.classList.remove('enter');S.entered=true},700)}
+  else S.entered=true;
+  return wrap}
+// ---------- Task 4: 裁剪台 · 对象目录与总览 ----------
+const cutUI={filterOpen:false,entered:false};
+function resetFilters(){S.filters={text:'',source:'all',advice:'all',decision:'all',execution:'all'}}
+function activeFilterCount(){const f=S.filters;
+  return Number(!!f.text)+(f.source!=='all')+(f.advice!=='all')+(f.decision!=='all')+(f.execution!=='all')}
+function filteredItems(){ // 五维筛选(matchFilter 与技能树共用);排序:可执行优先,无法判定垫底,其余保持原序
+  return S.data.items.map((i,idx)=>[i,idx]).filter(([i])=>matchFilter(i))
+    .sort((a,b)=>(available(a[0])?0:adviceKey(a[0])==='undetermined'?2:1)
+      -(available(b[0])?0:adviceKey(b[0])==='undetermined'?2:1)||a[1]-b[1])
+    .map(([i])=>i)}
+function miniIcon(i,size=44){ // 微型纸物图标:内联 SVG 纯线条,按插件/建议区分,只帮助辨认不挤占建议
+  const s={fill:'none',stroke:'var(--ink)','stroke-width':1.6,'stroke-linecap':'round','stroke-linejoin':'round'};
+  const doc=[hs('path',{...s,d:'M13 8 H25 L31 14 V36 H13 Z'}),hs('path',{...s,d:'M25 8 V14 H31'})];
+  let kids;
+  if(i.kind==='plugin')kids=[hs('path',{...s,d:'M10 16 L22 9 L34 16 V29 L22 36 L10 29 Z'}),
+    hs('path',{...s,d:'M10 16 L22 23 L34 16 M22 23 V36'})];
+  else switch(adviceKey(i)){
+    case 'pending':case 'undetermined':kids=[...doc,hs('text',{x:22,y:31,'text-anchor':'middle','font-size':15,fill:'var(--ink)'},'?')];break;
+    case 'disable':kids=[hs('path',{...s,d:'M9 17 H35 V33 H9 Z'}),hs('path',{...s,d:'M9 17 L14 10 H30 L35 17'}),
+      hs('path',{...s,d:'M18 24 H26'})];break;
+    case 'modify':kids=[hs('path',{...s,d:'M13 28 L27 12 L33 18 L19 34 L11 35 Z'}),hs('path',{...s,d:'M24 15 L30 21'})];break;
+    default:kids=[...doc,hs('path',{...s,d:'M17 25 L21 29 L28 20'})]}
+  return hs('svg',{width:size,height:size,viewBox:'0 0 44 44','aria-hidden':'true'},kids)}
+const trayIcon=()=>hs('svg',{width:72,height:56,viewBox:'0 0 72 56','aria-hidden':'true'},
+  hs('path',{fill:'none',stroke:'var(--ink)','stroke-width':2,'stroke-linejoin':'round',d:'M6 34 L16 12 H56 L66 34 V48 H6 Z'}),
+  hs('path',{fill:'none',stroke:'var(--ink)','stroke-width':2,'stroke-linejoin':'round',d:'M6 34 H26 L31 41 H41 L46 34 H66'}));
+function renderCutCatalog(shown,total){ // 左 220px 对象目录:搜索框(与主区同一 text 筛选)+ 按用途分组的可折叠列表
+  const f=S.filters,groups=[],byGroup=new Map();
+  for(const i of shown){if(!byGroup.has(i.group)){byGroup.set(i.group,[]);groups.push(i.group)}
+    byGroup.get(i.group).push(i)}
+  return h('aside',{class:'cut-catalog','aria-label':'对象目录'},
+    h('h2',null,'对象目录'),
+    h('div',{class:'cat-search'},
+      h('input',{type:'search',id:'cutCatalogSearch',placeholder:'搜索对象…','aria-label':'搜索对象',
+        value:f.text,oninput:e=>{S.filters.text=e.target.value;render()}})),
+    h('div',{class:'cat-groups'},
+      groups.length?groups.map(g=>{
+        const list=byGroup.get(g),collapsed=S.cutCollapsed.has(g);
+        return h('section',{class:'cat-group'},
+          h('button',{class:'cat-head',id:'cutCatHead-'+g,'aria-expanded':String(!collapsed),
+            onclick:()=>{collapsed?S.cutCollapsed.delete(g):S.cutCollapsed.add(g);render()}},
+            h('span',{class:'arrow','aria-hidden':'true'},collapsed?'▸':'▾'),g,
+            h('span',{class:'n'},String(list.length))),
+          collapsed?null:h('div',{class:'cat-list'},list.map(i=>
+            h('button',{class:'cat-item',id:'cutCatItem-'+i.id,'aria-current':S.selected===i.id?'true':null,
+              onclick:()=>{S.selected=i.id;render();
+                if(S.cutView==='overview'){ // 详情视图切换对象,总览视图滚动定位
+                  const r=document.querySelector('.cut-row[data-id="'+CSS.escape(i.id)+'"]');
+                  if(r)r.scrollIntoView({block:'nearest'})}}},
+              i.name,h('span',{class:'src',title:(i.sources||[])[0]||''},sourceName(i)+(ruleContext(i)?' · '+ruleContext(i):''))))))})
+      :h('p',{class:'cat-empty muted'},total?'无匹配对象':'此方案没有可审阅对象')))}
+function renderCut(){
+  if(S.cutView==='detail')return renderCutDetail();
+  return renderCutOverview()}
+function renderCutOverview(){
+  const items=S.data.items,f=S.filters;
+  const shown=filteredItems(),empty=items.length>0&&shown.length===0;
+  const skills=items.filter(i=>i.kind==='skill').length;
+  const adv={keep:0,modify:0,disable:0,pending:0,undetermined:0};
+  for(const i of items)adv[adviceKey(i)]++;
+  const approved=items.filter(i=>S.data.selection[i.id]==='approved').length;
+  const local=items.filter(i=>S.data.selection[i.id]==='approved'&&executable(i)).length;
+  const catalog=renderCutCatalog(shown,items.length);
+  // 筛选弹出层(DESIGN §1 收纳为工具栏):来源/建议/决定/执行方式
+  const scopes=[...new Set(items.map(i=>i.scope))];
+  const sel=(id,label,value,options,pick)=>h('label',{for:id},label,
+    h('select',{id,onchange:e=>{pick(e.target.value);render()}},
+      options.map(([v,t])=>h('option',{value:v,selected:value===v?'':null},t))));
+  const nFilt=activeFilterCount();
+  const toolbar=h('div',{class:'cut-toolbar'},
+    h('input',{type:'search',id:'cutSearch',placeholder:'搜索对象名称或用途…','aria-label':'搜索对象名称或用途',
+      value:f.text,oninput:e=>{S.filters.text=e.target.value;render()}}),
+    h('span',{class:'spacer'}),
+    h('div',{class:'cut-filter-wrap'},
+      h('button',{id:'cutFilterBtn','aria-expanded':String(cutUI.filterOpen),'aria-haspopup':'true',
+        onclick:()=>{cutUI.filterOpen=!cutUI.filterOpen;render();
+          requestAnimationFrame(()=>{const b=$('cutFilterBtn');if(b)b.focus({preventScroll:true})})}},
+        `筛选${nFilt?`(${nFilt})`:''}`),
+      cutUI.filterOpen?h('div',{class:'cut-filter-pop',role:'group','aria-label':'筛选条件'},
+        sel('cutFiltSource','来源',f.source,[['all','全部来源'],...scopes.map(s=>[s,sourceName({scope:s})])],v=>S.filters.source=v),
+        sel('cutFiltAdvice','建议',f.advice,[['all','全部建议'],['keep','保留'],['modify','修改'],['disable','停用'],['pending','待审读'],['undetermined','无法判定']],v=>S.filters.advice=v),
+        sel('cutFiltDecision','决定',f.decision,[['all','全部决定'],['none','未决定'],['approved','已采纳'],['deferred','暂不采纳']],v=>S.filters.decision=v),
+        sel('cutFiltExec','执行方式',f.execution,[['all','全部执行方式'],['workbench','工作台执行'],['host','宿主管理'],['none','不涉及变更'],['unavailable','尚无执行方案']],v=>S.filters.execution=v),
+        h('button',{id:'cutFilterReset',onclick:()=>{resetFilters();render()}},'清空筛选')):null));
+  // 对象卡片网格：执行记录与当前核验分别显示。
+  const enter=shown.length>0&&!cutUI.entered;cutUI.entered=true; // 首载一次 120ms 交叉淡入
+  const execStateName={'ready':'未应用','applied':'已应用','running':'执行中','problem':'需处理'};
+  const fact=(k,v,cls)=>h('div',{class:'cut-fact'},h('dt',null,k),h('dd',{class:cls||null},v));
+  const row=i=>{
+    const rstAt=S.restoredFlash.get(i.id),rst=!!rstAt&&Date.now()-rstAt<1200; // 恢复成功 220ms 三字段依次稳定更新
+    if(rstAt&&!rst)S.restoredFlash.delete(i.id);
+    return h('article',{class:'cut-row','data-id':i.id,
+      'aria-current':S.selected===i.id?'true':null,
+      'aria-label':`${i.name},建议:${adviceName(i)},决定:${decisionName(i)}`},
+    h('div',{class:'cut-ico'},miniIcon(i,64)),
+    h('div',{class:'cut-info'},
+      h('div',{class:'cut-name'},h('strong',null,i.name),
+        h('span',{class:'chip'},sourceName(i))),
+      h('dl',{class:'cut-facts'},
+        fact('推荐结果:',adviceName(i)),
+        fact('采纳决定:',decisionName(i),rst?'rst-f d1':decFlashCls(i.id)),
+        adviceKey(i)==='undetermined'&&i.rationale?fact('原因说明:',i.rationale):null,
+        fact('执行方式:',executionModeLabel(i)),
+        fact('执行状态:',executable(i)?(execStateName[i.executionState]||'未应用'):'—',rst?'rst-f':null),
+        effectiveText(i)?fact('实际核验:',effectiveText(i)):null,
+        rst?fact('最近结果:',i.lastOutcome?i.lastOutcome.status:'已恢复','rst-f d2'):null)),
+    h('div',{class:'cut-open-cell'},
+      h('button',{class:'cut-open',id:'cutOpen-'+i.id,onclick:()=>{S.selected=i.id;S.cutView='detail';render()}},'查看建议 →')))};
+  const body=items.length===0
+    ?h('div',{class:'cut-empty'},h('strong',null,'此方案没有可审阅对象'),
+      h('p',null,'当前方案未包含任何候选。'),
+      h('button',{onclick:()=>{S.scopeReturn='cut';go('scope')}},'查看方案范围'))
+    :empty
+    ?h('div',{class:'cut-empty'},trayIcon(),h('strong',null,'没有符合条件的对象'),
+      h('p',null,'调整搜索词或清除筛选。'),
+      h('button',{class:'primary',id:'cutEmptyReset',onclick:()=>{resetFilters();render()}},'清空筛选'))
+    :h('div',{class:'cut-list'+(enter?' x-in':'')},shown.map(row));
+  const main=h('div',{class:'cut-main'},
+    h('header',{class:'cut-head'},
+      h('h1',null,empty?'筛选 · 无匹配结果':'裁剪台 · 对象总览'),
+      planNotice(),
+      h('p',{class:'counts'},`${items.length} 对象 · ${skills} 技能 · ${items.filter(i=>i.kind==='plugin').length} 完整插件${items.some(i=>i.kind==='instruction')?' · '+items.filter(i=>i.kind==='instruction').length+' 规则':''}`),
+      h('p',{class:'adv-counts'},`${adv.keep} 保留 · ${adv.modify} 修改 · ${adv.disable} 停用 · ${adv.pending} 待审读 · ${adv.undetermined} 无法判定`)),
+    toolbar,body,
+    h('footer',{class:'cut-foot'},`${approved} 项已采纳，${local} 项有执行方案，${items.filter(unresolved).length} 项待落实`));
+  const wrap=h('div',{class:'cut-view',dataset:{readingKey:'overview'}},catalog,main);
+  return wrap}
+// ---------- Task 5: 裁剪台 · 对象详情(建议/文件差异/依据与验证) ----------
+async function loadDetails(id){ // 冻结详情缓存;失败保留错误,不伪装空差异(DESIGN §4);重试需显式清除缓存
+  if(S.details[id])return;
+  S.details[id]={status:'loading'};
+  try{S.details[id]={status:'ok',data:await api('items/'+id)}}
+  catch(e){S.details[id]={status:'error',error:e.message}}
+  if(S.route==='cut'&&S.cutView==='detail'&&S.selected===id&&S.detailTab==='diffs')render()}
+function backToOverview(){S.cutView='overview';render();
+  requestAnimationFrame(()=>{const t=document.querySelector('.cat-item[aria-current="true"]');
+    if(t)t.focus({preventScroll:true})})} // Esc/返回:焦点回目录当前项
+const changeStatusName={added:'新增',removed:'删除',modified:'修改'};
+function fmtBytes(n){if(n==null)return'—';
+  return n>=1024?(n/1024).toFixed(n%1024?1:0)+' KB('+n.toLocaleString('en-US')+' 字节)':n+' 字节'}
+function shortHash(x){return x?x.slice(0,8)+'…'+x.slice(-4):'—'}
+function lcsOps(a,b){ // 中段行级对齐;过大时退化为整段增删,避免 O(n·m) 爆炸
+  const n=a.length,m=b.length;
+  if(n*m>400000)return[...a.map(l=>({t:'-',l})),...b.map(l=>({t:'+',l}))];
+  const dp=new Uint32Array((n+1)*(m+1));
+  for(let i=n-1;i>=0;i--)for(let j=m-1;j>=0;j--)
+    dp[i*(m+1)+j]=a[i]===b[j]?dp[(i+1)*(m+1)+j+1]+1:Math.max(dp[(i+1)*(m+1)+j],dp[i*(m+1)+j+1]);
+  const ops=[];let i=0,j=0;
+  while(i<n&&j<m){
+    if(a[i]===b[j]){ops.push({t:'=',l:a[i]});i++;j++}
+    else if(dp[(i+1)*(m+1)+j]>=dp[i*(m+1)+j+1]){ops.push({t:'-',l:a[i]});i++}
+    else{ops.push({t:'+',l:b[j]});j++}}
+  while(i<n)ops.push({t:'-',l:a[i++]});
+  while(j<m)ops.push({t:'+',l:b[j++]});
+  return ops}
+function computeDiff(before,after){ // 公共前后缀 + 中段 LCS
+  const a=before===''?[]:before.split('\n'),b=after===''?[]:after.split('\n');
+  const min=Math.min(a.length,b.length);
+  let p=0;while(p<min&&a[p]===b[p])p++;
+  let s=0;while(s<min-p&&a[a.length-1-s]===b[b.length-1-s])s++;
+  return{pfx:a.slice(0,p),ops:lcsOps(a.slice(p,a.length-s),b.slice(p,b.length-s)),
+    sfx:a.slice(a.length-s),p,s,total:a.length,bTotal:b.length}}
+function lineRow(no,text,cls){
+  return h('div',{class:'dl'+(cls?' '+cls:'')},
+    h('span',{class:'no'},String(no)),
+    h('span',{class:'mk'},cls==='del'?'−':cls==='add'?'+':''),
+    h('span',{class:'tx'},text))}
+function foldRow(label,key){
+  return h('button',{class:'dl fold',id:'cutFold-'+key,onclick:()=>{
+      S.folds.has(key)?S.folds.delete(key):S.folds.add(key);render()}},
+    h('span',{class:'no'},''),h('span',{class:'mk'},''),h('span',{class:'tx'},label))}
+function pushRun(lines,startNo,rows,file,it,slot){ // 公共前后缀:>8 行折叠为可展开行(按文件记忆)
+  const LIMIT=8,EDGE=3,key=it.id+'/'+file.path+':'+slot,open=S.folds.has(key);
+  if(lines.length>LIMIT&&!open){
+    lines.slice(0,EDGE).forEach((l,k)=>rows.push(lineRow(startNo+k,l,'')));
+    rows.push(foldRow('··· 公共内容 '+(lines.length-EDGE*2)+' 行,点击展开 ···',key));
+    lines.slice(-EDGE).forEach((l,k)=>rows.push(lineRow(startNo+lines.length-EDGE+k,l,'')));
+  }else{
+    lines.forEach((l,k)=>rows.push(lineRow(startNo+k,l,'')));
+    if(lines.length>LIMIT&&open)rows.push(foldRow('··· 点击收起 ···',key))}}
+function diffRows(d,file,side,it){
+  const rows=[];
+  pushRun(d.pfx,1,rows,file,it,'pre');
+  let ln=d.p+1,rn=d.p+1;
+  for(const op of d.ops){
+    if(side==='before'){
+      if(op.t==='='){rows.push(lineRow(ln++,op.l,''));rn++}
+      else if(op.t==='-')rows.push(lineRow(ln++,op.l,'del'));
+    }else{
+      if(op.t==='='){rows.push(lineRow(rn++,op.l,''));ln++}
+      else if(op.t==='+')rows.push(lineRow(rn++,op.l,'add'))}}
+  pushRun(d.sfx,(side==='before'?d.total:d.bTotal)-d.sfx.length+1,rows,file,it,'post');
+  return rows}
+function diffPane(d,f,side,it){
+  const label=side==='before'?'冻结原件':'候选版本';
+  if(side==='before'?f.status==='added':f.status==='removed') // 单侧空态
+    return h('div',{class:'diff-pane'},
+      h('div',{class:'ph'},h('span',null,label)),
+      h('div',{class:'diff-empty'},f.status==='added'
+        ?'此文件在冻结原件中不存在(新增)。':'候选版本中已移除此文件;原件在应用时归档保留。'));
+  const pane=h('div',{class:'diff-pane',dataset:{scrollKey:it.id+'/'+f.path+':'+side}},
+    h('div',{class:'ph'},h('span',null,label),h('span',{class:'muted mono'},f.path)),
+    h('div',{role:'document','aria-label':label+' '+f.path},diffRows(d,f,side,it)));
+  return pane}
+function binCard(label,bytes,hash,exists,f){
+  return h('section',{class:'bin-card'},
+    h('h3',null,label),
+    exists?h('dl',{class:'bin-rows'},
+      h('div',null,h('dt',null,'文件名'),h('dd',{class:'mono'},f.path)),
+      h('div',null,h('dt',null,'大小'),h('dd',null,fmtBytes(bytes))),
+      h('div',null,h('dt',null,'SHA-256'),h('dd',{class:'mono',title:hash||''},shortHash(hash))),
+      h('div',null,h('dt',null,'类型'),h('dd',null,'二进制文件')))
+    :h('p',{class:'muted',style:'margin:0'},f.status==='added'
+      ?'此文件在冻结原件中不存在(新增)。':'候选版本中已移除此文件。'))}
+function renderDiffs(files,it){
+  if(!files.length)return h('div',{class:'diff-void'},executionExplanation(it));
+  const multi=it.changes.length>1; // 合并/拆分:整组展示与采纳,不提供逐文件勾选
+  const idx=Math.min(S.detailFiles[it.id]||0,files.length-1);S.detailFile=idx;
+  const f=files[idx];
+  const fileBtn=(file,i)=>h('button',{class:'file-btn',id:'cutFileBtn-'+i,
+      'aria-current':i===idx?'true':null,onclick:()=>{S.detailFiles[it.id]=i;render()}},
+    file.path,h('span',{class:'st'},changeStatusName[file.status]));
+  const listKids=[];
+  if(multi){
+    listKids.push(h('p',{class:'muted',style:'font-size:12.5px;padding:8px 12px;margin:0'},
+      ({merge:'合并整组',split:'拆分整组'}[it.action]||'整组')+'采纳、应用与恢复;不提供逐文件勾选。'));
+    let last=-1;
+    files.forEach((file,i)=>{
+      if(file.index!==last){last=file.index;
+        listKids.push(h('div',{class:'diff-group-head'},`变更 ${file.index+1} · ${file.target}`))}
+      listKids.push(fileBtn(file,i))});
+  }else files.forEach((file,i)=>listKids.push(fileBtn(file,i)));
+  const fileNav=isMobile() // 窄屏(图23):侧栏文件目录收为下拉,差异单栏增删上下堆叠
+    ?h('div',{class:'diff-files-m'},
+      h('label',{for:'cutFileSel'},`变化文件(${files.length})`),
+      h('select',{id:'cutFileSel',onchange:e=>{S.detailFiles[it.id]=+e.target.value;render()}},
+        files.map((file,i)=>h('option',{value:String(i),selected:i===idx?'':null},
+          (multi?`变更 ${file.index+1} · `:'')+file.path+' · '+changeStatusName[file.status]))),
+      multi?h('p',{class:'muted',style:'font-size:12.5px;margin:0'},
+        ({merge:'合并整组',split:'拆分整组'}[it.action]||'整组')+'采纳、应用与恢复;不提供逐文件勾选。'):null)
+    :h('div',{class:'diff-files'},h('h3',null,`变化文件(${files.length})`),listKids);
+  const main=[];
+  if(f.previewOnly||(it.revisionDraft&&!it.revisionDraft.writable))main.push(h('div',{class:'diff-trunc'},'本方案的规则修订稿仅供审阅，采纳尚未写入文件；不会进入工作台应用清单。需准备可执行的新方案并重新选择。'));
+  if(f.truncated)main.push(h('div',{class:'diff-trunc'},
+    '预览已截断(每侧 200,000 字节);完整内容保存在方案目录。'));
+  if(f.binary) // 图12:仅路径、大小、SHA-256,无假缩略图
+    main.push(h('div',{class:'bin-scroll'},
+      h('div',{class:'bin-cols'},
+        binCard('原文件',f.beforeBytes,f.beforeHash,f.status!=='added',f),
+        binCard('候选文件',f.afterBytes,f.afterHash,f.status!=='removed',f)),
+      h('p',{class:'muted',style:'font-size:13px;margin:0'},
+        '二进制文件不支持在线预览,只展示路径、大小与指纹。')));
+  else{const d=computeDiff(f.before||'',f.after||'');
+    main.push(h('div',{class:'diff-cols'},diffPane(d,f,'before',it),diffPane(d,f,'after',it)))}
+  return h('div',{class:'diff-layout'}, // 切换文件 140ms:仅内容淡入,文件目录保持位置
+    fileNav,
+    h('div',{class:'diff-main fade-in'},main))}
+function renderAdviceTab(it){
+  const kids=[];
+  if(it.summary)kids.push(h('p',{style:'font-size:15px;margin:0 0 14px'},it.summary));
+  if(it.blocked&&!['pending','undetermined'].includes(adviceKey(it)))kids.push(h('div',{class:'note-box'},
+    h('h3',null,'来源当前不可变更'),h('p',{style:'margin:0'},it.blocked)));
+  if(it.kind==='plugin'&&it.plugin){
+    const p=it.plugin;
+    kids.push(h('div',{class:'note-box'},
+      h('h3',null,`整包插件 · ${p.id||it.id}`),
+      h('p',{class:'muted',style:'margin:0 0 8px'},pluginInventory(it)),
+      pluginTarget(it)?h('p',{style:'margin:0 0 8px;overflow-wrap:anywhere'},pluginTarget(it)):null,
+      (p.components||[]).length?[
+        h('h3',null,'包含组件'),
+        h('ul',{style:'margin:0 0 8px;padding-left:18px'},p.components.map(c=>
+          h('li',null,typeof c==='string'?c:(c.name||c.id||JSON.stringify(c)))))]:null,
+      p.instructions?h('p',{style:'margin:0 0 8px'},p.instructions):null,
+      h('p',{class:'muted',style:'margin:0'},
+        executable(it)?'采纳后统一应用，调用正式插件接口启停；保留插件内部文件。恢复会检查后续变化，并还原原启停状态；Codex 可能保留显式配置键，不承诺配置文件字节不变。':'本方案尚无可执行插件操作；采纳只保存建议，插件仍需在原宿主的插件设置中处理。')))}
+  if(['pending','undetermined'].includes(adviceKey(it))) // 图09:缺口说明,采纳按钮在操作条中禁用
+    kids.push(h('div',{class:'note-box'},
+      h('h3',null,adviceKey(it)==='pending'?'尚未完成审读':'缺少决定所需的信息'),
+      h('p',{style:'margin:0 0 8px'},it.rationale||'现有资料不足以形成建议。'),
+      h('p',{class:'muted',style:'margin:0'},
+        executionExplanation(it))));
+  if(adviceKey(it)==='disable'&&it.executionMode==='workbench') // 只有可执行的本地停用才归档原件
+    kids.push(h('div',{class:'note-box'},
+      h('h3',null,'原技能目录 → 本次操作归档'),
+      h('p',{style:'margin:0 0 8px'},
+        '停用会在应用时归档原技能目录,不永久删除;原文件在「文件差异」页签中只读预览。'),
+      h('p',{class:'muted',style:'margin:0'},
+        '可在历史中选择原应用记录恢复;恢复前会检查后续修改。')));
+  if(adviceKey(it)==='keep'&&!executable(it))
+    kids.push(h('div',{class:'note-box'},
+      h('p',{style:'margin:0'},'本项没有文件修改。采纳保留仅记录决定,不产生待应用项。')));
+  if(!['pending','undetermined','keep'].includes(adviceKey(it))&&
+      ![it.summary,it.kind==='plugin'?it.plugin?.instructions:null].includes(executionExplanation(it)))
+    kids.push(h('p',{class:'note-box'},executionExplanation(it)));
+  if(['approved','deferred'].includes(it.priorDecision))kids.push(h('p',{class:'note-box'},
+    '上轮建议'+(it.priorDecision==='approved'?'已采纳':'暂不采纳')+'；仅供参考，本方案需重新决定，旧决定不授权新文件变更。'));
+  if(it.nextStep&&it.nextStep!==it.executionNote)kids.push(h('p',null,'下一步：'+it.nextStep));
+  if(it.kind!=='plugin'&&it.changes.length&&adviceKey(it)==='modify')
+    kids.push(h('p',{class:'muted',style:'font-size:13px;margin:0'},
+      '完整逐文件差异见「文件差异」页签;依据与未实测项见「依据与验证」页签。'));
+  return h('div',{class:'fade-in'},kids)}
+function renderEvidenceTab(it){ // 图06:原文依据/评审理由/验证记录 + 引用与方案覆盖
+  const evRow=(v,st)=>h('div',{class:'ev-row'},
+    h('span',null,v.name||'(未命名检查)',v.detail?h('span',{class:'muted'},' — '+v.detail):null),
+    h('span',{class:'st'},st));
+  const val=it.validation||[];
+  return h('div',{class:'fade-in'},
+    h('section',{class:'ev-sec'},h('h3',null,'01 原文依据'),
+      (it.evidence||[]).length?it.evidence.map(ev=>h('div',null,
+        h('blockquote',{class:'ev-quote'},ev.quote),
+        h('p',{class:'ev-src mono'},`${ev.path}${ev.line?':'+ev.line:''}`)))
+      :h('p',{class:'muted'},'没有记录原文引用。')),
+    h('section',{class:'ev-sec'},h('h3',null,'02 评审理由'),
+      h('p',{style:'margin:0'},it.rationale||'(无)')),
+    h('section',{class:'ev-sec'},h('h3',null,'03 验证记录'),
+      val.length?[...val.filter(v=>v.status==='passed').map(v=>evRow(v,'已验证')),
+        ...val.filter(v=>v.status!=='passed').map(v=>evRow(v,'未实测'))]
+      :h('p',{class:'muted'},'没有验证记录。')),
+    h('details',{class:'ev-sec'},h('summary',null,'相关本地引用(路径可复制)'),
+      (it.sources||[]).length?h('ul',{class:'mono',style:'font-size:13px'},
+        it.sources.map(s=>h('li',null,String(s)))):h('p',{class:'muted'},'无')),
+    h('details',{class:'ev-sec'},h('summary',null,'方案覆盖'),
+      (S.data.plan.coverage||[]).length?h('ul',{style:'font-size:13px'},
+        S.data.plan.coverage.map(c=>h('li',null,String(c)))):h('p',{class:'muted'},'无')))}
+function decisionBar(it){ // 底部固定操作条:暂不采纳 / 采纳建议(整组)/ 撤销采纳
+  const dec=S.data.selection[it.id],lock=S.data.busy||!S.online||S.requesting||it.state!=='ready';
+  const group=it.action==='merge'||it.action==='split';
+  const kids=[];
+  let hint='';
+  if(it.state==='applied')hint='本次操作已执行；实际状态见核验结果，撤回请前往“历史与恢复”';
+  else if(it.state!=='ready')hint='此项正在执行或需要处理，请查看“历史与恢复”';
+  else if(adviceKey(it)==='pending')hint='尚未完成审读，当前不可采纳';
+  else if(adviceKey(it)==='undetermined')hint='资料不足,无法采纳';
+  else if(it.blocked)hint=it.blocked;
+  else if(!canAdopt(it)&&dec!=='approved')hint='此项当前不可采纳';
+  else if(it.executionMode==='host'&&!executable(it))hint='已采纳也仅保存建议；插件尚无可执行方案';
+  else if(it.executionMode==='none')hint='采纳仅记录决定,不产生待应用项';
+  else if(it.executionMode==='unavailable')hint='采纳仅记录当前建议，后续新方案需重新审阅与选择';
+  else if(dec==='approved')hint='已采纳 · 在底部待应用栏统一应用';
+  if(hint)kids.push(h('span',{class:'hint'},hint));
+  kids.push(h('button',{id:'cutDeferBtn',disabled:lock||dec==='deferred',
+    onclick:()=>setChoice(it.id,'deferred')},'暂不采纳'));
+  if(dec==='approved')
+    kids.push(h('button',{class:'primary',id:'cutAdoptBtn',disabled:lock,
+      onclick:()=>setChoice(it.id,'none')},'撤销采纳'));
+  else
+    kids.push(h('button',{class:'primary',id:'cutAdoptBtn',disabled:lock||!canAdopt(it),
+      onclick:()=>setChoice(it.id,'approved')},group?'采纳整组':'采纳建议'));
+  return h('footer',{class:'detail-actions'},kids)}
+function renderCutDetail(){
+  const items=S.data.items,it=items.find(x=>x.id===S.selected);
+  if(!it){S.cutView='overview';return renderCutOverview()}
+  loadDetails(it.id);
+  const det=S.details[it.id];
+  const catalog=isMobile()?null:renderCutCatalog(filteredItems(),items.length); // 窄屏:详情占满整宽,目录留在总览(图23)
+  const sub=it.action==='merge'?'合并':it.action==='split'?'拆分':'';
+  const decCls=decFlashCls(it.id);
+  const head=h('header',{class:'cut-head detail-head'},
+    h('button',{class:'back',id:'cutDetailBack',onclick:backToOverview},'← 返回总览'),
+    h('h1',null,`${it.name} · ${adviceName(it)}${sub?' · '+sub:''}`),
+    h('p',{class:'detail-paths mono'},
+      it.changes.length===1
+        ?`来源:${it.changes[0].path}${it.changes[0].candidate?' · 候选已冻结':''}`
+        :it.changes.length>1?`整组变更:${it.changes.length} 处目标 · 以一个建议组采纳`
+        :(it.sources||[]).length?`审阅来源:${it.sources[0]}${it.sources.length>1?' 等 '+it.sources.length+' 处':''}`:'未注明审阅来源'),
+    h('p',{class:'detail-pills'},
+      h('span',{class:'chip'},sourceName(it)),
+      h('span',{class:'chip'+(decCls?' '+decCls:'')},decisionName(it)),
+      h('span',{class:'chip'},executionLabel(it))),
+    outcomeText(it)?h('p',{class:'detail-outcome'},outcomeText(it)):null,
+    effectiveText(it)?h('p',{class:'detail-outcome'},effectiveText(it)):null);
+  // 三栏摘要(图05):保留 / 调整(停用为"建议原因")/ 可能影响,仅有内容时显示
+  const cols=[];
+  if((it.preserves||[]).length)
+    cols.push(['保留',h('ul',null,it.preserves.map(x=>h('li',null,x)))]);
+  if(it.rationale&&!['pending','undetermined'].includes(adviceKey(it)))
+    cols.push([adviceKey(it)==='disable'?'建议原因':'调整',h('p',null,it.rationale)]);
+  const impacts=[...(it.removes||[]),...(it.warnings||[])];
+  if(impacts.length)cols.push(['可能影响',h('ul',null,impacts.map(x=>h('li',null,x)))]);
+  const summary=cols.length?h('div',{class:'detail-sum'},
+    cols.map(([t,c])=>h('section',null,h('h3',null,t),c))):null;
+  const tabs=[['advice','建议'],['diffs','文件差异'],['evidence','依据与验证']];
+  const tabbar=h('div',{class:'detail-tabs',role:'tablist','aria-label':'详情页签'},
+    tabs.map(([k,label],ti)=>h('button',{role:'tab',id:'cutTab-'+k,
+      'aria-selected':String(S.detailTab===k),tabindex:S.detailTab===k?'0':'-1',
+      onclick:()=>{S.detailTab=k;render()},
+      onkeydown:e=>{let n=null;
+        if(e.key==='ArrowLeft')n=(ti+tabs.length-1)%tabs.length;
+        else if(e.key==='ArrowRight')n=(ti+1)%tabs.length;
+        else if(e.key==='Home')n=0;else if(e.key==='End')n=tabs.length-1;
+        if(n!=null){e.preventDefault();S.detailTab=tabs[n][0];render();
+          requestAnimationFrame(()=>{const b=$('cutTab-'+tabs[n][0]);if(b)b.focus({preventScroll:true})})}}},label)));
+  let body;
+  if(S.detailTab==='diffs'){
+    if(!det||det.status==='loading') // 对象切换/首次:明确读取中
+      body=h('div',{class:'detail-body',role:'tabpanel'},
+        h('p',{class:'mono muted'},'读取冻结的修改稿…'));
+    else if(det.status==='error') // 保留建议区,差异区显错
+      body=h('div',{class:'detail-body',role:'tabpanel'},
+        h('div',{class:'note-box'},h('h3',null,'文件差异读取失败'),
+          h('p',{style:'margin:0 0 10px'},det.error||'未知错误'),
+          h('button',{onclick:()=>{delete S.details[it.id];loadDetails(it.id);render()}},'重试')));
+    else body=h('div',{class:'detail-body diffs',role:'tabpanel'},renderDiffs(det.data.files,it));
+  }else if(S.detailTab==='evidence')
+    body=h('div',{class:'detail-body',role:'tabpanel'},renderEvidenceTab(it));
+  else body=h('div',{class:'detail-body',role:'tabpanel'},renderAdviceTab(it));
+  const main=h('div',{class:'cut-main',dataset:{tab:S.detailTab}},head,summary,tabbar,body,decisionBar(it));
+  const wrap=h('div',{class:'cut-view',dataset:{readingKey:it.id+'/'+S.detailTab}},catalog,main);
+  return wrap}
+// ---------- Task 6: 待应用清单与应用流程 ----------
+const pendingApply={sig:'',requestId:''}; // requestId 幂等:同一 id 集合复用,集合变化才换新
+const execStateName={ready:'未应用',applied:'已应用',running:'执行中',problem:'需处理'};
+const execModeName={workbench:'工作台执行',host:'宿主管理',none:'不涉及变更',unavailable:'尚无执行方案'};
+const jobEntryName={pending:'等待中',running:'执行中',applied:'已应用',restored:'已恢复',
+  blocked:'检查未通过','rolled-back':'已回滚','recovery-conflict':'需处理',conflict:'恢复冲突'};
+const jobFinal=new Set(['applied','restored','blocked','rolled-back','recovery-conflict','conflict']);
+const jobItem=id=>S.data.items.find(x=>x.id===id);
+function fmtDate(iso){const d=new Date(iso);return isNaN(d)?'':d.toLocaleDateString('zh-CN',{hour12:false})}
+function fmtTime(iso){const d=new Date(iso);return isNaN(d)?'':d.toLocaleString('zh-CN',{hour12:false})}
+function activeApplyJob(){ // 本次发起的 apply job 优先;否则跟随轮询发现的进行中 apply(如刷新页面后)
+  const jobs=S.data?.jobs||[];
+  if(S.applyJobId){const j=jobs.find(j=>j.id===S.applyJobId);if(j)return j}
+  for(let k=jobs.length-1;k>=0;k--)if(jobs[k].kind==='apply'&&jobs[k].status==='running')return jobs[k];
+  return null}
+async function applySelected(){
+  if(!S.data||S.requesting||!S.online)return;
+  const ids=S.data.items.filter(available).map(i=>i.id);
+  if(!ids.length)return;
+  const sig=JSON.stringify(ids);
+  if(pendingApply.sig!==sig){pendingApply.sig=sig;pendingApply.requestId=crypto.randomUUID()}
+  S.requesting=true;render();
+  try{const job=await api('apply',{planFingerprint:S.data.plan.fingerprint,itemIds:ids,requestId:pendingApply.requestId});
+    S.applyJobId=job.id;S.pendingOpen=true;await refresh();render()}
+  catch(e){notice(e.message,true,e.status===409);if(e.status===409)await refresh()} // 指纹/源变化:展示服务端说明并核对真实状态
+  finally{S.requesting=false;render()}}
+function openPendingList(){if(!S.data)return;S.pendingOpen=true;render()}
+function closePendingList(){S.pendingOpen=false;
+  const j=S.applyJobId&&activeApplyJob();
+  if(j&&j.status!=='running')S.applyJobId=null; // 结果页关闭后不再跟随,执行中保留以便回到进度
+  render();
+  requestAnimationFrame(()=>{const b=$('pendingOpenBtn');if(b)b.focus({preventScroll:true})})} // 焦点回触发控件
+function jobRow(entry,cells){ // 逐项状态行;只有新状态短暂强调 160ms,同一轮询结果不重播
+  const key=entry._jobId+':'+entry.id,prev=S.jobRowStates.get(key);
+  S.jobRowStates.set(key,entry.status);
+  const tr=h('tr',{class:prev!==undefined&&prev!==entry.status?'pl-flash':null},cells);
+  return tr}
+function plHead(title,sub){return [
+  h('button',{class:'pl-crumb',id:'pendingBackBtn',onclick:closePendingList},'← 返回审阅'),
+  h('h1',null,title),
+  h('p',{class:'pl-sub'},sub)]}
+function renderPendingList(){ // 图13:完整待应用清单
+  const items=S.data.items,pending=items.filter(available);
+  const others=items.filter(i=>S.data.selection[i.id]==='approved'&&!executable(i));
+  const waiting=others.filter(unresolved);
+  const lock=S.data.busy||!S.online||S.requesting;
+  const scrollKids=plHead(`待应用 ${pending.length} 项`,`冻结方案 · ${fmtDate(S.data.plan.createdAt)}`);
+  if(waiting.length)scrollKids.push(h('p',{class:'pl-note'},`另有 ${waiting.filter(i=>i.kind==='instruction').length} 项规则、${waiting.filter(i=>i.kind==='plugin').length} 项插件已采纳但待落实；本次应用不会执行这些建议。`));
+  const shown=pending.filter(matchFilter).length; // 筛选不改变决定集合(CONTRACT L54)
+  if(pending.length&&shown<pending.length)
+    scrollKids.push(h('p',{class:'pl-note'},`当前筛选只显示 ${shown} 项，另 ${pending.length-shown} 项仍会应用。`));
+  scrollKids.push(h('section',{class:'pl-sec'},
+    h('h2',null,`待应用的变更(${pending.length} 项)`),
+    pending.length?h('table',{class:'pl-table'},
+      h('thead',null,h('tr',null,['名称','来源','推荐操作','决策状态','执行位置','应用状态','准备状态','操作']
+        .map(t=>h('th',{scope:'col'},t)))),
+      h('tbody',null,pending.map(i=>h('tr',null,
+        h('td',null,i.name,pluginTarget(i)?h('p',{class:'pl-cap'},pluginTarget(i)):null),
+        h('td',null,sourceName(i)),
+        h('td',null,adviceName(i)),
+        h('td',null,decisionName(i)),
+        h('td',null,executionModeLabel(i)),
+        h('td',null,execStateName[i.executionState]||'未应用'),
+        h('td',null,i.state==='ready'?'已准备':'需检查'),
+        h('td',null,h('button',{id:'pendingUndo-'+i.id,disabled:lock||null,
+          'aria-label':'撤销采纳 '+i.name,onclick:()=>setChoice(i.id,'none')},'撤销采纳'))))))
+    :h('p',{class:'pl-cap'},waiting.length?'当前没有可执行项，仍有已采纳建议待落实。':'没有待应用的变更。')));
+  if(others.length)
+    scrollKids.push(h('section',{class:'pl-sec'},
+      h('h2',null,`另 ${others.length} 项已采纳`),
+      h('p',{class:'pl-cap'},'保留建议无需变更；其余建议仍待落实，不计为执行完成。'),
+      h('table',{class:'pl-table'},
+        h('thead',null,h('tr',null,['名称','来源','推荐操作','决策状态','说明'].map(t=>h('th',{scope:'col'},t)))),
+        h('tbody',null,others.map(i=>h('tr',null,
+          h('td',null,i.name),
+          h('td',null,sourceName(i)),
+          h('td',null,adviceName(i)),
+          h('td',null,decisionName(i)),
+          h('td',null,executionExplanation(i))))))));
+  return {scroll:scrollKids,foot:[
+    h('span',{class:'spacer'}),
+    h('button',{onclick:closePendingList},'返回审阅'),
+    h('button',{class:'primary',id:'pendingApplyBtn',disabled:!pending.length||lock||null,
+      onclick:applySelected},`应用所选 ${pending.length}`)]}}
+function renderJobRunning(job){ // 图14:执行中,逐项状态来自 jobs 轮询;无取消/预计时间/虚构百分比
+  const done=job.items.filter(x=>jobFinal.has(x.status)).length;
+  const scrollKids=plHead('正在应用',`应用记录 ${job.id.slice(0,8)} · ${job.kind==='apply'?'应用':'恢复'}操作 · 开始于 ${fmtTime(job.startedAt)}`);
+  scrollKids.push(
+    h('p',{class:'pl-sub',style:'margin-bottom:0'},`${done} / ${job.items.length} 项完成`),
+    h('div',{class:'run-line'+(done===job.items.length?' done':''),'aria-hidden':'true'},
+      h('i',null)), // 固定短线段只表示进行中,不编码进度比例(真实计数由上行文字承担)
+    h('p',{class:'pl-note'},'执行中无法更改决定；关闭页面不取消任务。'),
+    h('section',{class:'pl-sec'},
+      h('table',{class:'pl-table'},
+        h('thead',null,h('tr',null,['项目','建议操作','执行状态','操作'].map(t=>h('th',{scope:'col'},t)))),
+        h('tbody',null,job.items.map(x=>{const it=jobItem(x.id);
+          return jobRow({_jobId:job.id,...x},[
+            h('td',null,it?it.name:x.id),
+            h('td',null,it?adviceName(it):'—'),
+            h('td',null,jobEntryName[x.status]||x.status),
+            h('td',{class:'muted'},jobEntryName[x.status]||x.status)])})))));
+  return {scroll:scrollKids,foot:[
+    h('span',{class:'pl-run'},`执行中 · 应用记录 ${job.id.slice(0,8)}`),
+    h('span',{class:'spacer'}),
+    h('button',{onclick:closePendingList},'返回审阅'),
+    h('button',{class:'primary',disabled:true},`应用所选`)]}}
+function renderJobResult(job){ // 图15:部分失败后停止;成功项保留,无自动重试
+  const failed=job.status==='failed';
+  const doneN=job.items.filter(x=>x.status==='applied'||x.status==='restored').length;
+  const badN=job.items.filter(x=>['blocked','rolled-back','recovery-conflict','conflict'].includes(x.status)).length;
+  const restN=job.items.length-doneN-badN;
+  const runDir=S.data.plan.runPhysical||'';
+  const scrollKids=plHead(failed?'已停止，保留已完成项':'已中断，请核对执行状态',
+    `应用记录 ${job.id.slice(0,8)} · ${job.kind==='apply'?'应用':'恢复'}操作 · ${fmtTime(job.startedAt)}`);
+  scrollKids.push(
+    h('p',{class:'pl-sub',style:'margin-bottom:14px'},
+      `${doneN} 项完成，${badN} 项需重新审阅，${restN} 项未执行。`),
+    h('section',{class:'pl-sec'},
+      h('table',{class:'pl-table'},
+        h('thead',null,h('tr',null,['对象名称','建议操作','当前核验','本次结果','说明'].map(t=>h('th',{scope:'col'},t)))),
+        h('tbody',null,job.items.map(x=>{
+          const it=jobItem(x.id);
+          const result=x.status==='applied'||x.status==='restored'?'已完成'
+            :x.status==='blocked'?'检查未通过，未写入'
+            :x.status==='rolled-back'?'已回滚，未保留变更'
+            :x.status==='recovery-conflict'?'需处理'
+            :x.status==='conflict'?'恢复冲突，未写入'
+            :x.status==='pending'?'尚未执行':(jobEntryName[x.status]||x.status);
+          const note=[];
+          if(x.status==='applied')note.push(h('p',{class:'pl-err'},it?.kind==='plugin'?'插件启停操作已执行。':'变更已写入。'));
+          else if(x.status==='restored')note.push(h('p',{class:'pl-err'},'本次恢复操作已完成。'));
+          else if(x.status==='pending'||x.status==='running')
+            note.push(h('p',{class:'pl-err'},'前序项未完成，本项未执行。'));
+          if(x.error)note.push(h('details',{class:'pl-detail'},
+            h('summary',null,x.status==='recovery-conflict'?'需处理 · 问题详情与归档信息':'问题详情'),
+            h('p',{class:'pl-err'},x.error),
+            x.status==='recovery-conflict'&&(x.steps||[]).length
+              ?h('p',{class:'pl-err mono'},'归档位置:'+(x.steps||[]).map(s=>runDir+'/'+s.archive).join('；'))
+              :null));
+          return jobRow({_jobId:job.id,...x},[
+            h('td',null,it?it.name:x.id),
+            h('td',null,it?adviceName(it):'—'),
+            h('td',null,it?effectiveText(it)||executionLabel(it):'—'),
+            h('td',null,result),
+            h('td',null,note)])})))),
+    h('p',{class:'pl-note'},'前面已完成的变更继续保留，后续项目未执行；不会自动重试。'));
+  return {scroll:scrollKids,foot:[
+    h('span',{class:'spacer'}),
+    h('button',{onclick:closePendingList},'返回审阅'),
+    h('button',{class:'primary',onclick:()=>{S.pendingOpen=false;S.applyJobId=null;go('history')}},
+      '查看历史与恢复')]}}
+function renderPendingLayer(){ // 覆盖层:打开 240ms(CSS);轮询就地更新并恢复焦点
+  const layer=$('pendingLayer');if(!layer)return;
+  for(const id of ['app-nav','view','pendingBar'])$(id).inert=!!(S.pendingOpen&&S.data);
+  if(!S.pendingOpen||!S.data){if(S.pendingOpen)S.pendingOpen=false;
+    layer.classList.remove('open');layer.replaceChildren();return}
+  const was=layer.classList.contains('open');
+  const ae=document.activeElement,refocus=ae&&layer.contains(ae)&&ae.id?ae.id:null;
+  const sl=layer.querySelector('.pl-scroll'),plTop=sl?sl.scrollTop:0; // 轮询重建后恢复滚动位置
+  const job=activeApplyJob();
+  const part=job&&job.status==='running'?renderJobRunning(job)
+    :job&&S.applyJobId===job.id&&job.status==='completed'?renderJobCompleted(job)
+    :job&&S.applyJobId===job.id&&(job.status==='failed'||job.status==='interrupted')?renderJobResult(job)
+    :renderPendingList();
+  layer.replaceChildren(
+    h('div',{class:'pl-scroll'},part.scroll),
+    h('footer',{class:'pl-foot'},part.foot));
+  const ns=layer.querySelector('.pl-scroll');if(ns)ns.scrollTop=plTop;
+  layer.classList.add('open');
+  if(refocus){const el=layer.querySelector('#'+CSS.escape(refocus));if(el)el.focus({preventScroll:true})}
+  else if(!was){const b=layer.querySelector('button:not(:disabled)');if(b)b.focus({preventScroll:true})}}
+const shownCompletions=new Map();
+function renderJobCompleted(job){
+  if(!shownCompletions.has(job.id))shownCompletions.set(job.id,Date.now());
+  const animate=Date.now()-shownCompletions.get(job.id)<900&&!S.reduced;
+  const done=job.items.filter(x=>x.status==='applied');
+  return{scroll:[h('section',{class:'pl-success'},
+    h('h2',null,'所选操作完成'),h('p',null,`${done.length} 项变更已执行，可在历史中恢复。当前实际状态以逐项核验为准。`),
+    S.data.items.some(unresolved)?h('p',null,`另有 ${S.data.items.filter(unresolved).length} 项已采纳建议待落实，未包含在本次执行中。`):null),
+    ...done.map(x=>{const it=jobItem(x.id),cut=adviceKey(it)==='disable';
+      return h('section',{class:'pl-sec'},
+        hs('svg',{class:'result-branch',viewBox:'0 0 180 90','aria-hidden':'true'},
+          hs('path',{d:'M 10 80 Q 45 35 105 32',fill:'none',stroke:'var(--ink)','stroke-width':2}),
+          hs('path',{d:'M 103 24 l 8 16 M 111 24 l -8 16',fill:'none',stroke:'var(--ink)','stroke-width':cut?2:0}),
+          hs('g',{class:animate?(cut?'cut-leaf':'new-leaf'):'',opacity:cut&&!animate?.25:1},
+            hs('circle',{cx:140,cy:32,r:23,fill:'var(--paper)',stroke:'var(--ink)','stroke-width':2}),
+            leafIcon(it,140,32))),
+        h('h3',null,it.name),h('p',null,it.kind==='plugin'?'插件启停操作已执行':it.kind==='instruction'?'规则修订稿已写入，原文件已备份':cut?'枝叶已剪下 · 原目录已归档':'分枝已修整 · 完整候选已替换'),
+        h('p',{class:'muted'},effectiveText(it)||'当前实际状态尚未核验'))})],
+    foot:[h('button',{id:'pendingBackBtn',onclick:()=>{S.pendingOpen=false;S.applyJobId=null;go('tree')}},'查看修剪后的技能树'),
+      h('span',{class:'spacer'}),h('button',{class:'primary',onclick:()=>{S.pendingOpen=false;S.applyJobId=null;go('history')}},'历史与恢复')]}}
+// ---------- Task 7: 历史与恢复 ----------
+const pendingRestore={sig:'',requestId:''}; // 恢复 requestId 幂等:同签名(原操作+项集合)复用,终态后由 refresh 清空(M2)
+const pickKey=(jobId,itemId)=>jobId+'/'+itemId;
+const restorable=job=>job.kind==='apply' // 与 engine 恢复准入一致:applied/running/recovery-conflict
+  ?job.items.filter(x=>['applied','running','recovery-conflict'].includes(x.status)):[];
+function jobSeqLabels(){ // 应用 A-01… / 恢复 R-01…,按时间顺序编号,仅用于展示
+  const map=new Map();let a=0,r=0;
+  for(const j of S.data.jobs)
+    map.set(j.id,(j.kind==='apply'?'A-':'R-')+String(j.kind==='apply'?++a:++r).padStart(2,'0'));
+  return map}
+function jobStatusLabel(j){
+  if(j.kind==='apply'&&j.items.length&&j.items.every(x=>x.status==='restored'))return '已恢复';
+  return{running:'执行中',completed:'已完成',failed:'已停止',interrupted:'已中断'}[j.status]||j.status}
+function archiveStepsFor(job,entry){ // 原件归档:apply 取自身 steps;restore 回溯原 apply 记录(operationId)
+  if(job.kind==='apply')return entry.steps||[];
+  const orig=S.data.jobs.find(j=>j.id===job.operationId);
+  const rec=orig&&orig.items.find(i=>i.id===entry.id);
+  return rec?rec.steps||[]:[]}
+async function restoreSelected(job){ // 每个 apply job 一个入口;POST /api/restore 需 operationId
+  if(!S.data||S.requesting||!S.online)return;
+  const ids=restorable(job).filter(x=>S.historyPick.has(pickKey(job.id,x.id))).map(x=>x.id);
+  if(!ids.length)return;
+  const sig=JSON.stringify([job.id,...ids.slice().sort()]);
+  if(pendingRestore.sig!==sig){pendingRestore.sig=sig;pendingRestore.requestId=crypto.randomUUID()}
+  S.requesting=true;render();
+  try{await api('restore',{planFingerprint:S.data.plan.fingerprint,itemIds:ids,operationId:job.id,requestId:pendingRestore.requestId});
+    for(const id of ids)S.historyPick.delete(pickKey(job.id,id));
+    await refresh();render()}
+  catch(e){notice(e.message,true,e.status===409);if(e.status===409)await refresh()}
+  finally{S.requesting=false;render()}}
+function histItemRow(job,x){
+  const it=jobItem(x.id),runDir=S.data.plan.runPhysical||'';
+  const key=pickKey(job.id,x.id),lock=S.data.busy||!S.online||S.requesting;
+  const canPick=job.kind==='apply'&&['applied','running','recovery-conflict'].includes(x.status);
+  const steps=archiveStepsFor(job,x).filter(s=>s.archive),archOpen=S.histArchive.has(key);
+  const result=[h('span',null,jobEntryName[x.status]||x.status)];
+  if(x.status==='conflict'||x.status==='recovery-conflict') // 图17:后续编辑与原件保留,不提供覆盖恢复
+    result.push(h('p',{class:'pl-err'},it?.kind==='plugin'?'插件状态存在冲突；未强制覆盖。':'当前文件与原件均保留;不提供覆盖恢复。'));
+  if(x.status==='restored') // 图18:回到未应用+未决定,允许重新审阅
+    result.push(h('p',{class:'pl-err'},'本次变更已恢复。'));
+  if(it&&effectiveText(it))result.push(h('p',{class:'pl-err'},'当前核验：'+effectiveText(it)));
+  if(x.error)result.push(h('details',{class:'pl-detail'},
+    h('summary',null,'问题详情'),h('p',{class:'pl-err'},x.error)));
+  return jobRow({_jobId:job.id,...x},[
+    h('td',null,job.kind==='apply'
+      ?h('input',{type:'checkbox',id:'histPick-'+job.id+'-'+x.id,
+          'aria-label':'选择恢复 '+(it?it.name:x.id),
+          checked:S.historyPick.has(key)?'':null,disabled:!canPick||lock||null,
+          onchange:e=>{e.target.checked?S.historyPick.add(key):S.historyPick.delete(key);render()}})
+      :null),
+    h('td',null,it?it.name:x.id),
+    h('td',null,job.kind==='restore'?'恢复':it?adviceName(it):'—'),
+    h('td',null,result),
+    h('td',null,steps.length?[
+      h('button',{id:'histArch-'+job.id+'-'+x.id,'aria-expanded':String(archOpen),
+        onclick:()=>{archOpen?S.histArchive.delete(key):S.histArchive.add(key);render()}},
+        archOpen?'收起归档':'展开归档'),
+      archOpen?h('ul',{class:'mono',style:'margin:6px 0 0;padding-left:18px;font-size:12.5px;word-break:break-all'},
+        steps.map(s=>h('li',null,runDir+'/'+s.archive))):null]
+      :'—'),
+    h('td',null,x.status==='restored'&&it
+      ?h('button',{class:'pl-crumb',id:'histRe-'+x.id,
+          onclick:()=>{S.selected=x.id;S.cutView='detail';go('cut')}},'重新审阅 →')
+      :null)])}
+function renderHistory(){
+  const jobs=S.data.jobs||[],view=$('view'); // M1:轮询重渲染前记录滚动与带 id 元素的焦点,重建后恢复
+  const prevScroll=view?view.scrollTop:0;
+  const ae=document.activeElement;
+  const refocus=ae&&ae.id&&view.contains(ae)?ae.id:null;
+  const valid=new Set(); // 丢弃已不可恢复的勾选(如刚被恢复),S.historyPick 本身跨渲染持久
+  for(const j of jobs)for(const x of restorable(j))valid.add(pickKey(j.id,x.id));
+  for(const k of[...S.historyPick])if(!valid.has(k))S.historyPick.delete(k);
+  let wrap;
+  if(!jobs.length) // 无历史:无空恢复按钮
+    wrap=h('div',{class:'hist-empty'},trayIcon(),
+      h('strong',null,'还没有应用或恢复记录'),
+      h('p',null,'应用或恢复操作完成后，记录会显示在这里。'),
+      h('button',{class:'primary',id:'histBackCut',onclick:()=>go('cut')},'回到裁剪台'));
+  else{
+    const seqs=jobSeqLabels(),lock=S.data.busy||!S.online||S.requesting;
+    const cards=[...jobs].reverse().map((job,idx)=>{ // 倒序卡片,最新一条默认展开
+      const open=(idx===0)!==S.histToggle.has(job.id);
+      const rest=restorable(job),picked=rest.filter(x=>S.historyPick.has(pickKey(job.id,x.id)));
+      return h('section',{class:'hist-job'},
+        h('button',{class:'hist-job-head',id:'histJob-'+job.id,'aria-expanded':String(open),
+          onclick:()=>{S.histToggle.has(job.id)?S.histToggle.delete(job.id):S.histToggle.add(job.id);render()}},
+          h('span',{class:'arrow','aria-hidden':'true'},open?'▾':'▸'),
+          h('strong',null,(job.kind==='apply'?'应用记录 ':'恢复记录 ')+seqs.get(job.id)),
+          h('span',{class:'time mono'},fmtTime(job.startedAt)),
+          job.kind==='restore'?h('span',{class:'muted'},
+            '原应用 '+(seqs.get(job.operationId)||'—')):null,
+          h('span',{class:'st'},jobStatusLabel(job))),
+        open?h('div',{class:'hist-job-body'},
+          h('table',{class:'pl-table'},
+            h('thead',null,h('tr',null,[job.kind==='apply'?'选择':'','对象','操作','结果','原件归档','后续']
+              .map(t=>h('th',{scope:'col'},t)))),
+            h('tbody',null,job.items.map(x=>histItemRow(job,x))))):null,
+        open&&job.kind==='apply'&&rest.length?h('footer',{class:'hist-job-foot'},
+          h('span',{class:'info'},(S.data.busy?'执行中，暂不能恢复 · ':'')+`可恢复 ${rest.length} 项 · 已选择 ${picked.length} 项`),
+          h('button',{class:'primary',id:'histRestore-'+job.id,disabled:!picked.length||lock||null,
+            onclick:()=>restoreSelected(job)},`恢复所选 ${picked.length}`)):null)});
+    wrap=h('div',{class:'hist-view'},
+      h('h1',null,'历史与恢复'),
+      h('p',{class:'pl-sub'},'查看过往的应用与恢复记录，并选择可恢复的项。'),
+      cards)}
+  requestAnimationFrame(()=>{if(!wrap.isConnected)return;
+    if(view)view.scrollTop=prevScroll;
+    if(refocus){const el=document.getElementById(refocus);if(el)el.focus({preventScroll:true})}});
+  return wrap}
+// ---------- Task 8: 方案范围(图19,全部只读,无编辑入口) ----------
+function renderScope(){
+  const plan=S.data.plan,items=S.data.items,p=plan.profile||{};
+  const skills=items.filter(i=>i.kind==='skill').length,plugins=items.filter(i=>i.kind==='plugin').length;
+  const cnt=s=>items.filter(i=>i.scope===s).length;
+  const back=()=>go(S.scopeReturn||'tree');
+  const row=(k,v,d)=>h('div',{class:'sc-row'},h('span',{class:'sc-k'},k),
+    h('span',{class:'sc-v'},v,d?h('span',{class:'d'},d):null));
+  const lg=(g,name,d)=>h('li',null,h('span',{class:'g','aria-hidden':'true'},g),
+    h('strong',null,name),h('span',{class:'d'},d));
+  const copyFp=async()=>{try{await navigator.clipboard.writeText(plan.fingerprint);notice('只读指纹已复制')}
+    catch{notice('只读指纹:'+plan.fingerprint)}}; // 剪贴板不可用时直接展示完整指纹
+  return h('div',{class:'scope-view'},
+    h('button',{class:'back',id:'scopeBack',onclick:back},'← 返回上一页'),
+    h('h1',null,'方案范围'),
+    h('p',{class:'scope-sub'},'本页展示本次分析的模型、任务与评审对象范围；全部内容为冻结方案的只读信息。'),
+    h('div',{class:'sc-cols'},
+      h('section',{class:'sc-panel','aria-label':'画像'},
+        h('h2',null,'画像'),
+        row('当前模型与宿主',p.model||'(方案未注明)',p.host?'宿主:'+p.host:''),
+        row('当前任务',(p.tasks||[]).join('、')||'(方案未注明)'),
+        row('使用偏好',(p.preferences||[]).join('、')||'(方案未注明)'),
+        row('方案准备日期',fmtDate(plan.createdAt))),
+      h('section',{class:'sc-panel','aria-label':'对象范围'},
+        h('h2',null,'对象范围'),
+        h('p',{class:'sc-big'},`${items.length} 对象 = ${skills} 技能 + ${plugins} 完整插件${items.some(i=>i.kind==='instruction')?' + '+items.filter(i=>i.kind==='instruction').length+' 规则':''}`),
+        row('用户独立与项目技能','纳入评审','由用户安装的独立技能及项目技能。'),
+        items.some(i=>i.kind==='instruction')?row('提示词与规则','单独审阅','可记录采纳或暂缓；不作为技能包写入。'):null,
+        row('完整插件','整包评审','以插件为单位进行整体评审,包含其所有组件。'),
+        row('平台固定背景','不计入候选','随平台提供的内置能力与运行基础,不纳入本次评审。'),
+        h('p',{class:'sc-note'},'插件组件归为一个对象；缓存版本不等于已安装。'))),
+    h('section',{class:'sc-panel','aria-label':'来源目录'},
+      h('h2',null,'来源目录与覆盖说明'),
+      row('发现目录',(plan.discoveryRoots||[]).length
+        ?h('ul',{class:'sc-list mono'},plan.discoveryRoots.map(r=>h('li',null,String(r.path))))
+        :'(方案未声明)'),
+      row('各项来源汇总',`用户来源 ${cnt('user')} · 项目来源 ${cnt('project')} · 完整插件 ${cnt('plugin')} · 平台固定 ${cnt('platform')+cnt('system')} · 来源未知 ${cnt('unknown')}`),
+      row('覆盖说明',(plan.coverage||[]).length
+        ?h('ul',{class:'sc-list'},plan.coverage.map(c=>h('li',null,String(c))))
+        :'(方案未记录)')),
+    h('section',{class:'sc-panel','aria-label':'评审与执行说明'},
+      h('h2',null,'评审与执行说明'),
+      h('div',{class:'sc-legend'},
+        h('div',null,h('h3',null,'推荐(对对象的评审结论)'),
+          h('ul',null,
+            lg('●','保留','建议保留,当前任务仍需要。'),
+            lg('◐','修改','建议调整后继续使用。'),
+            lg('✕','停用','建议不再使用。'),
+            lg('?','无法判定','当前信息不足以判断,需补充信息(未评审 / 待补信息)。'))),
+        h('div',null,h('h3',null,'决定(用户的采纳意向)'),
+          h('ul',null,
+            lg('○','未决定','尚未做出采纳决定。'),
+            lg('☑','已采纳','同意该评审结论。'),
+            lg('−','暂不采纳','不同意该评审结论。'))),
+        h('div',null,h('h3',null,'执行方式(若涉及变更时的处理方式)'),
+          h('ul',null,
+            lg('⚙︎','工作台执行','由本工具在工作台中执行变更。'),
+            lg('▣','宿主管理','需在宿主环境中手动管理。'),
+            lg('⊖','不涉及变更','仅记录决定,不进行变更。'),
+            lg('◌','尚无执行方案','暂无明确的执行方案。'))))),
+    h('footer',{class:'sc-foot'},
+      h('span',null,'方案准备 ',h('span',{class:'mono'},fmtDate(plan.createdAt))),
+      h('span',null,'只读指纹 ',h('span',{class:'mono'},shortHash(plan.fingerprint)),
+        ' ',h('button',{id:'scopeCopyFp',onclick:copyFp},'复制')),
+      h('span',{class:'spacer'}),
+      h('button',{onclick:back},'← 返回')))}
+$('pendingOpenBtn').onclick=openPendingList;
+$('applyButton').onclick=applySelected;
+$('toastClose').onclick=hideToast;
+$('motionToggleBtn').onclick=motionToggle;
+reducedMedia.onchange=e=>{ // 没有显式选择时跟随系统；手动开关在页面刷新后保持。
+  if(!['reduced','full'].includes(localStorage.getItem('prune-motion'))){S.reduced=e.matches;applyMotionPref()}};
+mqMobile.onchange=()=>{if(S.data)render()}; // 跨越移动断点时重建视图(树分组折叠/详情目录/文件下拉)
+applyMotionPref(); // M-2 挂载点:启动时按 localStorage['prune-motion'] 挂 reduced 类
+refresh();setInterval(refresh,1100);
+</script>
