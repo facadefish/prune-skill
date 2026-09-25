@@ -12,6 +12,8 @@ For a collection, assess coverage against the set that would remain after the re
 
 Describe the capability and its actual activation conditions. Remove catchalls that pull the skill into unrelated tasks and modifiers that add no distinction. Check competing triggers across skills. After revising a description, consider an intended task and a nearby task that should not activate it. Optimize discrimination, not an arbitrary length or compression ratio.
 
+When the user reports that a skill does not work, distinguish host discovery, selection, execution after selection, and unavailable tools or resources. Diagnose from records provided within the authorized scope. Without execution evidence, label the cause as a hypothesis; do not collect private sessions on your own. Rewriting a description cannot fix installation, missing tools, or execution logic. Propose a correction at the layer that failed.
+
 ## R3 · Selective loading
 
 For multiple workflows, route to the material needed for the current task. Keep shared invariants and discoverable resource paths. Moving repeated content into an always-required reference does not make loading selective. A short, single workflow need not be split; restructuring must preserve prerequisites, links, and dependencies.
@@ -33,6 +35,12 @@ Check for duplication or conflicts among skills, task prompts, and relevant proj
 ## R7 · Proportionate validation
 
 Match checks to the change and the claim. For text revisions, inspect activation boundaries, retained constraints, and references. Test relevant behavior when scripts change, and retain required project checks. Repeat or expand validation only for new changes, failures, or unresolved concerns. Semantic review does not initiate model A/B runs by default. File checks, author review, and tool tests do not establish improved model performance.
+
+For revisions that change selection or workflow, derive a few discriminating scenarios and expected outcomes from the user's tasks and original skill before rewriting; compare the original and candidate afterward. Reuse provided examples where possible. Label constructed examples rather than presenting them as observed usage. Choose ordinary tasks, confusing neighboring tasks, or failures involving necessary constraints according to the change; do not impose a case quota or a full matrix on every object. Wording-only corrections need no separate case suite. For assessment-only requests, describe useful future checks without claiming to have validated a nonexistent candidate.
+
+A scenario identifies the input and necessary context, observable result or prohibited side effect, evidence from the original and candidate, and the check method and actual result. Check correct content, retained capabilities, and stopping conditions, not just keywords, headings, file existence, or skill invocation. Judge correct selection separately from task completion. The original may fail on the defect being corrected; unrelated capabilities and constraints must survive. Reuse existing `validation` records: make static walkthroughs, tool checks, and model runs explicit in `name` / `detail`. `passed` means only that the named check actually passed. Use `unknown` with the reason for unperformed or failed checks; never report a walkthrough as an execution result.
+
+Only when the user requests measured comparisons, establish the tasks, inputs, success conditions, budget, and stopping scope separately. Use the original version as the baseline for a revision. For incremental value with versus without the skill, verify that conversations, project rules, memory, or other skills have not supplied its content to the baseline; starting a new child task alone does not establish isolation. Keep the model, host, tools, other instructions, and inputs comparable, and preserve actual outputs and failures. Separate environmental failures such as missing tools or timeouts from content failures; mark an invalid comparison unknown. If iterating against cases, reserve tasks not used during rewriting for the final check. Report individual outcomes and sample limitations; unavailable token, cost, or loading telemetry remains unknown.
 
 ## R8 · Decision boundaries
 
